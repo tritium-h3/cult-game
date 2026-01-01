@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Sparkles } from 'lucide-react';
-import './App.css';
+import { useNavigate } from 'react-router-dom';
+import './Game.css';
 import { CARD_SPREADS, generateInitialGameState, getNarrativeAndGameState } from './game/reading';
 
 export default function CultCardSelection() {
@@ -9,6 +10,7 @@ export default function CultCardSelection() {
   const [flippedCard, setFlippedCard] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [narrative, setNarrative] = useState<Narrative | null>(null);
+  const navigate = useNavigate();
 
   const handleCardClick = (cardId: string) => {
     if (flippedCard === cardId) {
@@ -79,8 +81,7 @@ export default function CultCardSelection() {
             </button>
             <button
               onClick={() => {
-                // This would transition to the actual game
-                alert('Game would start here with this state!');
+                navigate('/game');
               }}
               className="px-6 py-3 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
             >
