@@ -2,15 +2,16 @@ import React, { useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import './Game.css';
-import { CARD_SPREADS, generateInitialGameState, getNarrativeAndGameState } from './game/reading';
+import { CARD_SPREADS, generateInitialGameState, getNarrative, getGameState } from './game/reading';
 
 export default function CultCardSelection() {
   const [currentSpread, setCurrentSpread] = useState<number>(0);
   const [selectedCards, setSelectedCards] = useState<string[]>([]);
   const [flippedCard, setFlippedCard] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState<boolean>(false);
-  const [narrative, setNarrative] = useState<Narrative | null>(null);
+  const [narrative, setNarrative] = useState<string>('');
+  const [gameState, setGameState] = useState<GameState>({} as GameState);
   const navigate = useNavigate();
+  const [readingState, setNarrativeState] = useState<'selection' | 'narrating' | 'ready'>('selection');
 
   const handleCardClick = (cardId: string) => {
     if (flippedCard === cardId) {
@@ -30,9 +31,21 @@ export default function CultCardSelection() {
     }
   };
 
-  const generateNarrative = async (selections: string[]) => {
-    setIsGenerating(true);
+  function reset() {
+      setNarrativeState('selection');
+      setCurrentSpread(0);
+      setSelectedCards([]);
+      setFlippedCard(null);
+      setNarrative('');
+      setGameState({} as GameState);
+  }
 
+  function addToNarrative(text: string) {
+    setNarrative((prev) => prev + text);
+  }
+
+  const generateNarrative = async (selections: string[]) => {
+    setNarrativeState('narrating');
     const selectedCards: Card[] = selections.map((id, idx) => {
       const spread = CARD_SPREADS[idx];
       const card = spread.cards.find(c => c.id === id);
@@ -40,40 +53,60 @@ export default function CultCardSelection() {
       return card;
     });
 
-    const narrative = await getNarrativeAndGameState(selectedCards);
-    setNarrative(narrative);
-
-    setIsGenerating(false);
+    const gameStateTemplate = await generateInitialGameState(selectedCards);
+    console.log('Generated game state template:', gameStateTemplate);
+    const narrativeText = await getNarrative(selectedCards, gameStateTemplate, addToNarrative);
+    const gameState = await getGameState(narrativeText || '', gameStateTemplate);
+    setGameState(gameState || {} as GameState);
+    if (narrativeText && gameState) {
+      try {
+        localStorage.setItem('cultGameState', JSON.stringify(gameState));
+        console.log('Game state saved to localStorage');
+        setNarrativeState('ready');
+      } catch (storageError) {
+        console.error('Failed to save to localStorage:', storageError);
+      }
+    } else {
+      alert('Failed to generate narrative or game state. Please try again.');
+      reset();
+    }
   };
 
-  if (narrative) {
+  if ((readingState === 'narrating') || (readingState === 'ready')) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-8">
         <div className="max-w-4xl mx-auto">
           <div className="text-center mb-8">
-            <Sparkles className="w-12 h-12 mx-auto mb-4 text-amber-400" />
-            <h1 className="text-4xl font-serif mb-2">The Reading Is Complete</h1>
+            {readingState === 'narrating' ? (
+              <>
+                <Sparkles className="w-12 h-12 mx-auto mb-4 text-amber-400 animate-pulse" />
+                <h1 className="text-4xl font-serif mb-2">Your Path Is Being Revealed...</h1>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-12 h-12 mx-auto mb-4 text-amber-400" />
+                <h1 className="text-4xl font-serif mb-2">The Reading Is Complete</h1>
+              </>
+            )}
           </div>
           
           <div className="bg-black/40 border-2 border-amber-600/30 rounded-lg p-8 backdrop-blur mb-8">
             <div className="prose prose-invert prose-amber max-w-none">
-              <p className="text-lg leading-relaxed whitespace-pre-wrap">{narrative.narrative}</p>
+              <p className="text-lg leading-relaxed whitespace-pre-wrap">{narrative}</p>
             </div>
           </div>
 
           <div className="bg-black/40 border-2 border-purple-600/30 rounded-lg p-6 backdrop-blur mb-8">
             <h2 className="text-xl font-serif text-purple-300 mb-4">Initial Game State</h2>
             <pre className="text-xs text-amber-100/80 overflow-x-auto whitespace-pre-wrap">
-              {JSON.stringify(narrative.gameState, null, 2)}
+              {JSON.stringify(gameState, null, 2)}
             </pre>
           </div>
 
           <div className="flex gap-4 justify-center">
             <button
-              onClick={() => {
-                setCurrentSpread(0);
-                setSelectedCards([]);
-                setNarrative(null);
+              onClick={() => { 
+                reset();
               }}
               className="px-6 py-3 bg-purple-800/50 hover:bg-purple-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
             >
@@ -84,6 +117,7 @@ export default function CultCardSelection() {
                 navigate('/game');
               }}
               className="px-6 py-3 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
+              disabled={readingState !== 'ready'}
             >
               Begin Your Work
             </button>
@@ -105,10 +139,7 @@ export default function CultCardSelection() {
           <p className="text-amber-200/70">Card {currentSpread + 1} of {CARD_SPREADS.length}</p>
           <button
             onClick={() => {
-              setCurrentSpread(0);
-              setSelectedCards([]);
-              setFlippedCard(null);
-              setNarrative(null);
+              reset();
             }}
             className="mt-4 px-4 py-2 text-sm bg-slate-800/50 hover:bg-slate-700/50 border border-amber-600/30 rounded text-amber-200 transition-colors"
           >
@@ -199,13 +230,6 @@ export default function CultCardSelection() {
             );
           })}
         </div>
-
-        {isGenerating && (
-          <div className="text-center">
-            <Sparkles className="w-8 h-8 mx-auto mb-2 text-amber-400 animate-spin" />
-            <p className="text-amber-300">The cards reveal your fate...</p>
-          </div>
-        )}
       </div>
     </div>
   );

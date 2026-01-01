@@ -162,9 +162,7 @@ export async function generateInitialGameState(selectedCards: Card[]): Promise<G
     return gameStateTemplate;
   }
 
-export async function getNarrativeAndGameState(selectedCards: Card[]): Promise<Narrative> {
-    const gameStateTemplate: GameState = await generateInitialGameState(selectedCards);
-
+export async function getNarrative(selectedCards: Card[], gameStateTemplate : GameState, addToNarrative: (text: string) => void): Promise<string | undefined> {
     const selectedCardDetails: string = selectedCards.map((card, idx) => {
       const spread = CARD_SPREADS[idx];
       return `${spread.meaning}: ${card.mechanicalDesc}`;
@@ -178,76 +176,129 @@ export async function getNarrativeAndGameState(selectedCards: Card[]): Promise<N
         },
         body: JSON.stringify({
           model: 'gemma3:12b',
-          prompt: `You are creating the origin story and initial game state for a cult management game. Based on these characteristics:
+          prompt: `You are creating the origin story for a cult management game. Based on these characteristics:
 
+<characteristics>
 ${selectedCardDetails}
+</characteristics>
 
 And this game state template:
+<game_state>
 ${JSON.stringify(gameStateTemplate, null, 2)}
+</game_state>
 
-Your task is to:
-1. Write a concrete 2-paragraph narrative (under 150 words) in second person describing how this cult began
-2. Fill in ALL the placeholders in the JSON template above with specific, concrete details
-
-CRITICAL: You must return ONLY valid JSON in this exact format:
-{
-  "narrative": "your narrative text here...",
-  "gameState": { ...the completed game state... }
-}
+Your task is to write a concrete 2-paragraph narrative (under 150 words) in second person describing how this cult began.
 
 Guidelines:
-- Be SPECIFIC: for example, "assistant professor of mathematics at Miskatonic Community College" not "learned person"
+- Be SPECIFIC: for example, "assistant professor of mathematics at University of Cairo" not "learned person", or "ancient Sumerian tablet" not "old artifact"
 - Give followers real names and concrete backgrounds
 - Choose a real city for the starting location
 - Make artifact names evocative but concrete
-- Leader traits should be 2-3 adjectives in an array like ["scholarly", "obsessive"]
-- Follower skills should be 1-2 concrete skills in an array like ["research", "persuasion"]
-- Make everything consistent with the card choices
-- Make the narrative consistent with the game state details
+- Make everything consistent with the card choices and the game state template
 - The narrative should be in two paragraphs:
   - The first paragraph should be the founder's origin and discovery of the occult
   - The second paragraph should describe how they began the cult and the initial followers
+`,
+          stream: true,
+          keep_alive: '60m'
+        })
+      });
 
-Return ONLY the JSON object, no other text.`,
+      const reader = response.body?.getReader();
+      if (!reader) {
+        console.error('No response body');
+        return undefined;
+      }
+
+      const decoder = new TextDecoder();
+      let done = false;
+      let text = '';
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n').filter(line => line.trim() !== '');
+          for (const line of lines) {
+            let json: any;
+            try {
+              json = JSON.parse(line);
+            } catch (e) {
+              console.error('Failed to parse line as JSON:', line);
+              continue;
+            }
+            text += json.response;
+            addToNarrative(json.response);
+            if (json.done) {
+              // Generation complete
+              done = true;
+              break;
+            }
+          }
+        }
+      }
+      return text;
+
+    } catch (error) {
+      console.error('API error:', error);
+      return undefined;
+    }
+  }
+
+  export async function getGameState(narrativeText: string, gameStateTemplate: GameState): Promise<GameState | undefined> {
+    try {
+      const response = await fetch('http://torment-nexus.local:11434/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gemma3:12b',
+          prompt: `You are filling in the initial game state for a cult management game from its initial narrative.
+Based on this narrative:
+<narrative>
+${narrativeText}
+</narrative>
+
+And this game state template with placeholders:
+<game_state_template>
+${JSON.stringify(gameStateTemplate, null, 2)}
+</game_state_template>
+
+Your task is to fill in the placeholders in the game state template with concrete details from the narrative.
+Return the full game state as valid JSON.
+
+Ensure that:
+- All placeholders are filled in with specific details from the narrative (if they exist). If they don't exist in the narrative, create plausible details consistent with the narrative.
+- The JSON structure is preserved and valid.
+- Leader traits should be 2-3 adjectives in an array like ["scholarly", "obsessive"]
+- Follower skills should be 1-2 concrete skills in an array like ["research", "persuasion"]
+`,
           stream: false,
           format: 'json', // This tells Ollama to enforce JSON output
-          keep_alive: '60m',
+          keep_alive: '60m'
         })
       });
 
       const data = await response.json();
-      console.log('API response:', data);
+      console.log('API response for game state:', data);
       const text = data.response; // Ollama puts the response in data.response
 
       // Try to parse the JSON response
-      let parsed: Narrative;
+      let parsed: GameState;
       try {
         // Remove markdown code blocks if present
         const cleaned: string = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
         parsed = JSON.parse(cleaned);
         
-        // Save to localStorage
-        try {
-          localStorage.setItem('cultGameState', JSON.stringify(parsed.gameState));
-          console.log('Game state saved to localStorage');
-        } catch (storageError) {
-          console.error('Failed to save to localStorage:', storageError);
-        }
-        
         return parsed;
       } catch (e) {
         console.error('Failed to parse JSON:', e);
-        return {
-          narrative: 'The cards blur and shift. The reading is unclear. Perhaps you should try again...',
-          gameState: gameStateTemplate
-        };
+        return undefined;
       }
     } catch (error) {
       console.error('API error:', error);
-      return {
-        narrative: 'The cards blur and shift. The reading is unclear. Perhaps you should try again...',
-        gameState: gameStateTemplate
-      };
+      return undefined;
     }
   }
     
