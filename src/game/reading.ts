@@ -1,6 +1,12 @@
-import { allFakers, faker, fakerNB_NO } from "@faker-js/faker";
-import { fakerAR, fakerCS_CZ, fakerEN_US, fakerEN_GB, fakerEN_IN, fakerTR, fakerJA, fakerPL, fakerES_MX, fakerHE, fakerZH_CN, fakerEL, Faker } from '@faker-js/faker';
 import { transliterate } from "transliteration";
+import { CITIES } from "./world";
+import { fakerEN_US } from "@faker-js/faker";
+import { Card, GameState, Spread } from "./types";
+
+interface Narrative {
+  narrative: string;
+  gameState: GameState;
+}
 
 export const CARD_SPREADS: Spread[] = [
   {
@@ -65,29 +71,6 @@ export const CARD_SPREADS: Spread[] = [
   }
 ];
 
-const CITIES = [
-  { id: 'prague', name: 'Prague', flavor: 'alchemical history, astronomical mysteries', faker: fakerCS_CZ },
-  { id: 'alexandria', name: 'Alexandria', flavor: 'ancient libraries, lost knowledge', faker: fakerAR, needs_transliteration: true },
-  { id: 'salem', name: 'Salem, MA', flavor: 'witch trials, puritan secrets', faker: fakerEN_US },
-  { id: 'istanbul', name: 'Istanbul', flavor: 'crossroads of empires, layered histories', faker: fakerTR },
-  { id: 'new-orleans', name: 'New Orleans', flavor: 'voodoo, jazz, swamp mysteries', faker: fakerEN_US },
-  { id: 'kyoto', name: 'Kyoto', flavor: 'temples, shrines, ritual traditions', faker: fakerJA, needs_transliteration: true },
-  { id: 'edinburgh', name: 'Edinburgh', flavor: 'underground vaults, enlightenment darkness', faker: fakerEN_GB },
-  { id: 'marrakech', name: 'Marrakech', flavor: 'souks, desert mysticism', faker: fakerAR, needs_transliteration: true },
-  { id: 'reykjavik', name: 'Reykjavik', flavor: 'sagas, volcanic landscapes', faker: fakerNB_NO },
-  { id: 'varanasi', name: 'Varanasi', flavor: 'death rituals, river ghats', faker: fakerEN_IN },
-  { id: 'cairo', name: 'Cairo', flavor: 'pyramids, desert tombs', faker: fakerAR, needs_transliteration: true },
-  { id: 'san-francisco', name: 'San Francisco', flavor: 'counterculture, tech occultism', faker: fakerEN_US },
-  { id: 'krakow', name: 'Kraków', flavor: 'medieval alchemy, salt mines', faker: fakerPL },
-  { id: 'mexico-city', name: 'Mexico City', flavor: 'Aztec ruins beneath modernity', faker: fakerES_MX },
-  { id: 'jerusalem', name: 'Jerusalem', flavor: 'three faiths, ancient stones', faker: fakerHE, needs_transliteration: true },
-  { id: 'london', name: 'London', flavor: 'Victorian occultism, foggy secrets', faker: fakerEN_GB },
-  { id: 'shanghai', name: 'Shanghai', flavor: 'colonial decay, modern excess', faker: fakerZH_CN, needs_transliteration: true },
-  { id: 'sedona', name: 'Sedona, AZ', flavor: 'vortexes, new age seekers', faker: fakerEN_US },
-  { id: 'athens', name: 'Athens', flavor: 'philosophical ruins, oracle sites', faker: fakerEL, needs_transliteration: true },
-  { id: 'santa-fe', name: 'Santa Fe', flavor: 'desert spirituality, art colonies', faker: fakerES_MX }
-];
-
 const ARCHETYPE_CITIES : { [key: string]: string[] } = {
   'fool': ['san-francisco', 'shanghai', 'london', 'new-orleans', 'mexico-city', 'istanbul', 'sedona'],
   'hanged': ['varanasi', 'kyoto', 'jerusalem', 'sedona', 'athens', 'santa-fe', 'cairo'],
@@ -108,16 +91,15 @@ function generateName(cityId : string) : string {
   }
 }
 
-export async function generateInitialGameState(selectedCards: Card[]): Promise<GameState> {
+export async function generateInitialGameState(selectedCards: Card[], cultName: string, leaderName: string): Promise<GameState> {
   // Determine starting city based on leader archetype
   const archetype : string = selectedCards[0].id;
   const possibleCities = ARCHETYPE_CITIES[archetype] || CITIES.map(city => city.id);
   const startingCity = possibleCities[Math.floor(Math.random() * possibleCities.length)];
 
-  const leaderName = generateName(startingCity);
-
   // Generate initial game state template with placeholders
     const gameStateTemplate: GameState = {
+      cultName: cultName,
       leader: {
         name: leaderName,
         background: "[LEADER_BACKGROUND]",
@@ -152,6 +134,7 @@ export async function generateInitialGameState(selectedCards: Card[]): Promise<G
     for (let i = 0; i < followerCount; i++) {
       const followerName = generateName(startingCity);
       gameStateTemplate.followers.push({
+        id: `initial-follower-${i + 1}`,
         name: followerName,
         background: `[FOLLOWER_${i + 1}_BACKGROUND]`,
         location: startingCity,
@@ -162,14 +145,15 @@ export async function generateInitialGameState(selectedCards: Card[]): Promise<G
     return gameStateTemplate;
   }
 
-export async function getNarrative(selectedCards: Card[], gameStateTemplate : GameState, addToNarrative: (text: string) => void): Promise<string | undefined> {
+export async function getNarrative(selectedCards: Card[], gameStateTemplate : GameState, addToNarrative: (text: string) => void, host?: string): Promise<string | undefined> {
     const selectedCardDetails: string = selectedCards.map((card, idx) => {
       const spread = CARD_SPREADS[idx];
       return `${spread.meaning}: ${card.mechanicalDesc}`;
     }).join('\n');
 
     try {
-      const response = await fetch('http://torment-nexus.local:11434/api/generate', {
+      const hostUrl = host ? `http://${host}:11434` : 'http://torment-nexus.local:11434';
+      const response = await fetch(`${hostUrl}/api/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -190,6 +174,7 @@ ${JSON.stringify(gameStateTemplate, null, 2)}
 Your task is to write a concrete 2-paragraph narrative (under 150 words) in second person describing how this cult began.
 
 Guidelines:
+- Invent details for all placeholders in the game state template
 - Be SPECIFIC: for example, "assistant professor of mathematics at University of Cairo" not "learned person", or "ancient Sumerian tablet" not "old artifact"
 - Give followers real names and concrete backgrounds
 - Choose a real city for the starting location
@@ -198,6 +183,7 @@ Guidelines:
 - The narrative should be in two paragraphs:
   - The first paragraph should be the founder's origin and discovery of the occult
   - The second paragraph should describe how they began the cult and the initial followers
+- ONLY output the narrative text, do NOT output the game state or any other explanation
 `,
           stream: true,
           keep_alive: '60m'
@@ -266,7 +252,7 @@ ${JSON.stringify(gameStateTemplate, null, 2)}
 </game_state_template>
 
 Your task is to fill in the placeholders in the game state template with concrete details from the narrative.
-Return the full game state as valid JSON.
+Return the full game state as valid JSON. ONLY return the JSON, do NOT include any other text.
 
 Ensure that:
 - All placeholders are filled in with specific details from the narrative (if they exist). If they don't exist in the narrative, create plausible details consistent with the narrative.

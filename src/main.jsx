@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import './index.css'
 import CultCardSelection from './CultCardSelection.js'
 import CultGameInterface from './CultGameInterface.js'
+import LoadSampleMode from './LoadSampleMode.js'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -11,6 +12,7 @@ createRoot(document.getElementById('root')).render(
       <Routes>
         <Route path="/" element={<CultCardSelection />} />
         <Route path="/game" element={<CultGameInterface />} />
+        <Route path="/sample" element={<LoadSampleMode />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

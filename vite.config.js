@@ -11,7 +11,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     host: "0.0.0.0",
-    allowedHosts: ['torment-nexus.local']
+    allowedHosts: ['torment-nexus.local', 'samarkand.hopto.org']
   },
   resolve: {
     alias: {

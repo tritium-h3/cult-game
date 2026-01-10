@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, User, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import './Game.css';
 import { CARD_SPREADS, generateInitialGameState, getNarrative, getGameState } from './game/reading';
+import { Card, GameState, Spread } from './game/types';
 
 export default function CultCardSelection() {
   const [currentSpread, setCurrentSpread] = useState<number>(0);
@@ -11,7 +12,9 @@ export default function CultCardSelection() {
   const [narrative, setNarrative] = useState<string>('');
   const [gameState, setGameState] = useState<GameState>({} as GameState);
   const navigate = useNavigate();
-  const [readingState, setNarrativeState] = useState<'selection' | 'narrating' | 'ready'>('selection');
+  const [readingState, setNarrativeState] = useState<'selection' | 'naming' | 'narrating' | 'ready'>('selection');
+  const [cultName, setCultName] = useState('');
+  const [leaderName, setLeaderName] = useState('');
 
   const handleCardClick = (cardId: string) => {
     if (flippedCard === cardId) {
@@ -23,7 +26,8 @@ export default function CultCardSelection() {
       if (currentSpread < CARD_SPREADS.length - 1) {
         setCurrentSpread(currentSpread + 1);
       } else {
-        generateNarrative(newSelections);
+        // All cards selected, move to naming state
+        setNarrativeState('naming');
       }
     } else {
       // Flip card
@@ -38,25 +42,38 @@ export default function CultCardSelection() {
       setFlippedCard(null);
       setNarrative('');
       setGameState({} as GameState);
+      setCultName('');
+      setLeaderName('');
   }
 
   function addToNarrative(text: string) {
     setNarrative((prev) => prev + text);
   }
 
-  const generateNarrative = async (selections: string[]) => {
+  const generateNarrative = async () => {
     setNarrativeState('narrating');
-    const selectedCards: Card[] = selections.map((id, idx) => {
+    const selectedCardsData: Card[] = selectedCards.map((id, idx) => {
       const spread = CARD_SPREADS[idx];
       const card = spread.cards.find(c => c.id === id);
       if (!card) throw new Error(`Card with id ${id} not found in spread ${spread.title}`);
       return card;
     });
 
-    const gameStateTemplate = await generateInitialGameState(selectedCards);
+    const gameStateTemplate = await generateInitialGameState(selectedCardsData, cultName.trim(), leaderName.trim());
+    // Update template with user-provided names
+    gameStateTemplate.cultName = cultName.trim();
+    gameStateTemplate.leader.name = leaderName.trim();
+    
     console.log('Generated game state template:', gameStateTemplate);
-    const narrativeText = await getNarrative(selectedCards, gameStateTemplate, addToNarrative);
+    const narrativeText = await getNarrative(selectedCardsData, gameStateTemplate, addToNarrative, window.location.hostname);
     const gameState = await getGameState(narrativeText || '', gameStateTemplate);
+    
+    if (gameState) {
+      // Ensure the names from form are preserved
+      gameState.cultName = cultName.trim();
+      gameState.leader.name = leaderName.trim();
+    }
+    
     setGameState(gameState || {} as GameState);
     if (narrativeText && gameState) {
       try {
@@ -72,6 +89,89 @@ export default function CultCardSelection() {
     }
   };
 
+  const handleNameSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cultName.trim() || !leaderName.trim()) {
+      alert('Please enter both a cult name and a leader name.');
+      return;
+    }
+    generateNarrative();
+  };
+
+  // Name input screen
+  if (readingState === 'naming') {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-8">
+        <div className="max-w-2xl mx-auto">
+          <div className="text-center mb-12">
+            <Sparkles className="w-12 h-12 mx-auto mb-4 text-amber-400 animate-pulse" />
+            <h1 className="text-4xl font-serif mb-2">Name Your Destiny</h1>
+            <p className="text-amber-200/70">Every cult needs a name. Every leader needs an identity.</p>
+          </div>
+
+          <form onSubmit={handleNameSubmit} className="space-y-8">
+            <div className="bg-black/40 border-2 border-amber-600/30 rounded-lg p-8 backdrop-blur">
+              <div className="mb-6">
+                <label htmlFor="cult-name" className="flex items-center gap-2 text-amber-300 mb-2">
+                  <Users className="w-5 h-5" />
+                  <span className="text-lg font-serif">The Cult</span>
+                </label>
+                <input
+                  id="cult-name"
+                  type="text"
+                  value={cultName}
+                  onChange={(e) => setCultName(e.target.value)}
+                  placeholder="The Order of the Veiled Truth..."
+                  className="w-full px-4 py-3 bg-slate-900/50 border border-amber-600/30 rounded text-amber-100 placeholder-amber-300/30 focus:outline-none focus:border-amber-500/50 transition-colors"
+                  maxLength={100}
+                />
+                <p className="text-xs text-amber-300/50 mt-2">What will they call your congregation?</p>
+              </div>
+
+              <div>
+                <label htmlFor="leader-name" className="flex items-center gap-2 text-amber-300 mb-2">
+                  <User className="w-5 h-5" />
+                  <span className="text-lg font-serif">The Leader</span>
+                </label>
+                <input
+                  id="leader-name"
+                  type="text"
+                  value={leaderName}
+                  onChange={(e) => setLeaderName(e.target.value)}
+                  placeholder="Margot Ashford..."
+                  className="w-full px-4 py-3 bg-slate-900/50 border border-amber-600/30 rounded text-amber-100 placeholder-amber-300/30 focus:outline-none focus:border-amber-500/50 transition-colors"
+                  maxLength={100}
+                />
+                <p className="text-xs text-amber-300/50 mt-2">What name shall you be known by?</p>
+              </div>
+            </div>
+
+            <div className="flex gap-4 justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setNarrativeState('selection');
+                  setCultName('');
+                  setLeaderName('');
+                }}
+                className="px-6 py-3 bg-slate-800/50 hover:bg-slate-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
+              >
+                Return to Cards
+              </button>
+              <button
+                type="submit"
+                className="px-6 py-3 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors font-serif text-lg"
+              >
+                Reveal Your Path
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // Narration and ready screens
   if ((readingState === 'narrating') || (readingState === 'ready')) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-8">

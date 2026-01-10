@@ -1,22 +1,41 @@
 import React, { useState, useEffect, DragEvent } from 'react';
 import { MapPin, User, Calendar } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import "./Game.css"
+import { enactCityActions, performCityActions, prototypeActionsForCity, deserializeActionMap, serializeActionMap } from './game/actions';
+import { CITIES, getCityById } from './game/world';
+import { City, Follower, GameState } from './game/types';
 
 export default function CultGameInterface() {
   const [gameState, setGameState] = useState<GameState | null>(null);
-  const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<City | undefined>(undefined);
   const [view, setView] = useState<'map' | 'location'>('map');
-  const [assignments, setAssignments] = useState<Record<number, number>>({}); // { actionIndex: followerIndex }
-  const [draggedFollower, setDraggedFollower] = useState<{followerIndex: number, fromActionIndex: number | null} | null>(null);
+  const [assignments, setAssignments] = useState<Record<string, string>>({}); // { actionId: followerId }
+  const [draggedFollower, setDraggedFollower] = useState<{followerIndex: string, fromActionIndex: string | null} | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     // Load game state from localStorage
     try {
       const saved = localStorage.getItem('cultGameState');
       if (saved) {
-        const state = JSON.parse(saved);
+        const state = JSON.parse(saved) as GameState;
+        // Load the serialized action map if it exists
+        const savedMap = localStorage.getItem('cultGameActionMap');
+        if (savedMap) {
+          try {
+            state.map = deserializeActionMap(savedMap);
+          } catch (e) {
+            console.error('Failed to deserialize action map, regenerating:', e);
+            const startCity = state.hqLocation ? getCityById(state.hqLocation) || CITIES[0] : CITIES[0];
+            state.map = { [startCity.id]: prototypeActionsForCity(startCity) };
+          }
+        } else {
+          // No saved map, generate default
+          const startCity = state.hqLocation ? getCityById(state.hqLocation) || CITIES[0] : CITIES[0];
+          state.map = { [startCity.id]: prototypeActionsForCity(startCity) };
+        }
         setGameState(state);
-        setSelectedLocation(state.startingLocation);
       } else {
         // No saved game, show message
         setGameState(null);
@@ -26,7 +45,7 @@ export default function CultGameInterface() {
     }
   }, []);
 
-  const handleDragStart = (e : DragEvent<HTMLDivElement>, followerIndex: number, fromActionIndex : number | null = null) => {
+  const handleDragStart = (e : DragEvent<HTMLDivElement>, followerIndex: string, fromActionIndex : string | null = null) => {
     setDraggedFollower({ followerIndex, fromActionIndex });
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'move';
@@ -40,14 +59,14 @@ export default function CultGameInterface() {
     }
   };
 
-  const handleDrop = (e : DragEvent<HTMLDivElement>, actionIndex : number) => {
+  const handleDrop = (e : DragEvent<HTMLDivElement>, actionIndex : string) => {
     e.preventDefault();
     if (draggedFollower !== null) {
       const { followerIndex, fromActionIndex } = draggedFollower;
       
       // Check if this follower is already assigned somewhere (other than where they're being dragged from)
-      const currentAssignment : [string, number] | undefined = Object.entries(assignments).find(
-        ([actIdx, followerIdx]) => followerIdx === followerIndex && parseInt(actIdx) !== fromActionIndex
+      const currentAssignment : [string, string] | undefined = Object.entries(assignments).find(
+        ([actIdx, followerIdx]) => followerIdx === followerIndex && actIdx !== fromActionIndex
       );
       
       // Remove from current assignment if exists
@@ -97,15 +116,8 @@ export default function CultGameInterface() {
   };
 
   if (!gameState) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 flex items-center justify-center p-8">
-        <div className="text-center">
-          <h1 className="text-3xl font-serif mb-4">No Active Cult</h1>
-          <p className="text-amber-200/70 mb-4">You need to complete the card reading first to begin your work.</p>
-          <p className="text-sm text-amber-300/50">This prototype expects a saved game state in localStorage.</p>
-        </div>
-      </div>
-    );
+    navigate('/');
+    return null;
   }
 
   // Map view
@@ -116,7 +128,7 @@ export default function CultGameInterface() {
         <div className="max-w-7xl mx-auto mb-6">
           <div className="flex justify-between items-center bg-black/30 border border-amber-600/20 rounded-lg p-4">
             <div>
-              <h1 className="text-2xl font-serif text-amber-300">The Work Begins</h1>
+              <h1 className="text-2xl font-serif text-amber-300">{gameState.leader.name}</h1>
               <p className="text-sm text-amber-200/70">{gameState.leader.background}</p>
             </div>
             <div className="flex items-center gap-4 text-sm">
@@ -141,20 +153,20 @@ export default function CultGameInterface() {
             <div className="space-y-4">
               <div 
                 className="bg-gradient-to-r from-purple-900/30 to-slate-900/30 border border-amber-500/30 rounded-lg p-6 cursor-pointer hover:border-amber-500/60 transition-colors"
-                onClick={() => setView('location')}
+                onClick={() => { setSelectedLocation(getCityById(gameState.hqLocation)); setView('location'); }}
               >
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="flex items-center gap-2 mb-2">
                       <MapPin className="w-5 h-5 text-amber-400" />
-                      <h3 className="text-lg font-serif text-amber-300">{gameState.hqLocation}</h3>
+                      <h3 className="text-lg font-serif text-amber-300">{getCityById(gameState.hqLocation)?.name}</h3>
                     </div>
                     <p className="text-sm text-amber-200/60 mb-3">Your initial base of operations</p>
                     
                     {/* Show adherents at this location */}
                     <div className="space-y-2">
                       <p className="text-xs text-amber-300/70 uppercase tracking-wide">Adherents Present:</p>
-                      {gameState.followers.map((follower, idx) => (
+                      {gameState.followers.map((follower: Follower, idx) => (
                         <div key={idx} className="flex items-center gap-2 text-sm">
                           <div className="w-2 h-2 rounded-full bg-amber-500"></div>
                           <span className="text-amber-100">{follower.name}</span>
@@ -183,20 +195,7 @@ export default function CultGameInterface() {
 
   // Location view
   if (view === 'location') {
-    const actions = [
-      {
-        title: 'Research at Local Libraries',
-        description: 'Search for occult knowledge in public archives and university collections.'
-      },
-      {
-        title: 'Attend Cultural Gatherings',
-        description: 'Mingle with locals, build connections, identify potential recruits.'
-      },
-      {
-        title: 'Explore Historic Sites',
-        description: 'Visit old churches, cemeteries, and forgotten places. Something may be hidden there.'
-      }
-    ];
+    const actions = gameState.map?.[selectedLocation?.id || ''] || [];
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-6">
@@ -210,7 +209,7 @@ export default function CultGameInterface() {
               >
                 ← Back to Map
               </button>
-              <h1 className="text-2xl font-serif text-amber-300">{selectedLocation}</h1>
+              <h1 className="text-2xl font-serif text-amber-300">{selectedLocation?.name}</h1>
             </div>
             <div className="flex items-center gap-4 text-sm">
               <div className="flex items-center gap-2">
@@ -234,13 +233,13 @@ export default function CultGameInterface() {
                 <h2 className="text-lg font-serif text-amber-300 mb-4">Adherents</h2>
                 <div className="space-y-3">
                   {gameState.followers.map((follower, idx) => {
-                    const isAssigned = Object.values(assignments).includes(idx);
+                    const isAssigned = Object.values(assignments).includes(follower.id);
                     
                     return (
                       <div 
                         key={idx}
                         draggable={!isAssigned}
-                        onDragStart={(e) => handleDragStart(e, idx)}
+                        onDragStart={(e) => handleDragStart(e, follower.id)}
                         className={`bg-purple-900/20 border border-amber-500/20 rounded-lg p-3 transition-all ${
                           !isAssigned 
                             ? 'cursor-move hover:border-amber-500/40 hover:shadow-lg' 
@@ -273,9 +272,9 @@ export default function CultGameInterface() {
                 
                 <div className="space-y-4">
                   {actions.map((action, actionIdx) => {
-                    const assignedFollowerIdx = assignments[actionIdx];
-                    const assignedFollower = assignedFollowerIdx !== undefined 
-                      ? gameState.followers[assignedFollowerIdx] 
+                    const assignedFollowerId = assignments[action.id];
+                    const assignedFollower = assignedFollowerId !== undefined 
+                      ? gameState.followers.find((follower) => follower.id === assignedFollowerId)
                       : null;
 
                     return (
@@ -285,7 +284,7 @@ export default function CultGameInterface() {
                         
                         <div 
                           onDragOver={handleDragOver}
-                          onDrop={(e) => handleDrop(e, actionIdx)}
+                          onDrop={(e) => handleDrop(e, action.id)}
                           className={`border-2 border-dashed rounded p-4 min-h-20 transition-colors ${
                             assignedFollower 
                               ? 'border-amber-500/60 bg-amber-900/10' 
@@ -295,7 +294,7 @@ export default function CultGameInterface() {
                           {assignedFollower ? (
                             <div 
                               draggable
-                              onDragStart={(e) => handleDragStart(e, assignedFollowerIdx, actionIdx)}
+                              onDragStart={(e) => handleDragStart(e, assignedFollower.id, action.id)}
                               className="cursor-move hover:bg-amber-900/20 transition-colors rounded p-2 -m-2"
                             >
                               <div className="flex items-start justify-between">
@@ -335,7 +334,20 @@ export default function CultGameInterface() {
                 <div className="mt-6 text-center">
                   <button 
                     className="px-6 py-3 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
-                    onClick={() => alert('Turn processing not yet implemented')}
+                    onClick={() => {
+                      const results = performCityActions(assignments, actions, gameState);
+                      alert(JSON.stringify(results, null, 2));
+                      enactCityActions(assignments, results, gameState);
+                      setGameState({ ...gameState, week: gameState.week + 1 });
+                      // Save action map separately using serialization
+                      if (gameState.map) {
+                        localStorage.setItem('cultGameActionMap', serializeActionMap(gameState.map));
+                      }
+                      // Save game state without map (map is saved separately)
+                      const { map, ...stateToSave } = gameState;
+                      localStorage.setItem('cultGameState', JSON.stringify(stateToSave));
+                      setView('map');
+                    }}
                   >
                     Complete Week's Work
                   </button>
