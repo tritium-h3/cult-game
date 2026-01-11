@@ -10,11 +10,13 @@ export default function LoadSampleMode() {
   useEffect(() => {
     // Create a sample GameState
     const sampleGameState: GameState = {
+      cultName: "The Obsidian Circle",
       leader: {
         name: "Alaric Thorne",
         background: "Former archaeologist turned mystic after discovering an ancient artifact",
         archetype: "The Seeker",
-        traits: "Charismatic, obsessive, scholarly"
+        traits: "Charismatic, obsessive, scholarly",
+        skills: ["research", "occult-knowledge"]
       },
       discovery: {
         type: "Ancient Artifact",

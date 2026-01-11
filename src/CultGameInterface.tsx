@@ -2,16 +2,17 @@ import React, { useState, useEffect, DragEvent } from 'react';
 import { MapPin, User, Calendar } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import "./Game.css"
-import { enactCityActions, performCityActions, prototypeActionsForCity, deserializeActionMap, serializeActionMap } from './game/actions';
+import { completeWeek, saveGameState, prototypeActionsForCity, deserializeActionMap } from './game/actions';
 import { CITIES, getCityById } from './game/world';
-import { City, Follower, GameState } from './game/types';
+import { City, Follower, GameState, Outcome, Action } from './game/types';
 
 export default function CultGameInterface() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<City | undefined>(undefined);
-  const [view, setView] = useState<'map' | 'location'>('map');
+  const [view, setView] = useState<'map' | 'location' | 'report'>('map');
   const [assignments, setAssignments] = useState<Record<string, string>>({}); // { actionId: followerId }
   const [draggedFollower, setDraggedFollower] = useState<{followerIndex: string, fromActionIndex: string | null} | null>(null);
+  const [weekResults, setWeekResults] = useState<{ results: Record<string, Outcome>; updatedState: GameState; assignments: Record<string, string>; actions: Action[] } | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -20,30 +21,45 @@ export default function CultGameInterface() {
       const saved = localStorage.getItem('cultGameState');
       if (saved) {
         const state = JSON.parse(saved) as GameState;
+        console.log('Loading game state from localStorage');
+        console.log('state.hqLocation:', state.hqLocation);
         // Load the serialized action map if it exists
         const savedMap = localStorage.getItem('cultGameActionMap');
         if (savedMap) {
           try {
             state.map = deserializeActionMap(savedMap);
+            console.log('Deserialized action map:', state.map);
+            console.log('Action map keys:', Object.keys(state.map));
+            
+            // Check if the map has actions for the HQ location, if not regenerate
+            const startCity = state.hqLocation ? getCityById(state.hqLocation) || CITIES[0] : CITIES[0];
+            if (!state.map[startCity.id] || state.map[startCity.id].length === 0) {
+              console.log('Map missing actions for HQ location, regenerating for:', startCity.id);
+              state.map[startCity.id] = prototypeActionsForCity(startCity);
+            }
           } catch (e) {
             console.error('Failed to deserialize action map, regenerating:', e);
             const startCity = state.hqLocation ? getCityById(state.hqLocation) || CITIES[0] : CITIES[0];
             state.map = { [startCity.id]: prototypeActionsForCity(startCity) };
+            console.log('Regenerated map for city:', startCity.id);
           }
         } else {
           // No saved map, generate default
           const startCity = state.hqLocation ? getCityById(state.hqLocation) || CITIES[0] : CITIES[0];
           state.map = { [startCity.id]: prototypeActionsForCity(startCity) };
+          console.log('No saved map, generated default for city:', startCity.id);
         }
+        console.log('Final state.map:', state.map);
         setGameState(state);
       } else {
-        // No saved game, show message
-        setGameState(null);
+        // No saved game, redirect to home
+        navigate('/');
       }
     } catch (error) {
       console.error('Failed to load game state:', error);
+      navigate('/');
     }
-  }, []);
+  }, [navigate]);
 
   const handleDragStart = (e : DragEvent<HTMLDivElement>, followerIndex: string, fromActionIndex : string | null = null) => {
     setDraggedFollower({ followerIndex, fromActionIndex });
@@ -116,7 +132,6 @@ export default function CultGameInterface() {
   };
 
   if (!gameState) {
-    navigate('/');
     return null;
   }
 
@@ -153,7 +168,15 @@ export default function CultGameInterface() {
             <div className="space-y-4">
               <div 
                 className="bg-gradient-to-r from-purple-900/30 to-slate-900/30 border border-amber-500/30 rounded-lg p-6 cursor-pointer hover:border-amber-500/60 transition-colors"
-                onClick={() => { setSelectedLocation(getCityById(gameState.hqLocation)); setView('location'); }}
+                onClick={() => { 
+                  const city = getCityById(gameState.hqLocation);
+                  console.log('Clicking to enter location');
+                  console.log('gameState.hqLocation:', gameState.hqLocation);
+                  console.log('city:', city);
+                  console.log('gameState.map:', gameState.map);
+                  setSelectedLocation(city); 
+                  setView('location'); 
+                }}
               >
                 <div className="flex items-start justify-between">
                   <div>
@@ -195,7 +218,15 @@ export default function CultGameInterface() {
 
   // Location view
   if (view === 'location') {
+    console.log('=== LOCATION VIEW DEBUG ===');
+    console.log('selectedLocation:', selectedLocation);
+    console.log('selectedLocation?.id:', selectedLocation?.id);
+    console.log('gameState.map:', gameState.map);
+    console.log('gameState.map keys:', gameState.map ? Object.keys(gameState.map) : 'no map');
     const actions = gameState.map?.[selectedLocation?.id || ''] || [];
+    console.log('Looking for actions with key:', selectedLocation?.id || '');
+    console.log('actions found:', actions);
+    console.log('=== END DEBUG ===');
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-6">
@@ -335,24 +366,88 @@ export default function CultGameInterface() {
                   <button 
                     className="px-6 py-3 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
                     onClick={() => {
-                      const results = performCityActions(assignments, actions, gameState);
-                      alert(JSON.stringify(results, null, 2));
-                      enactCityActions(assignments, results, gameState);
-                      setGameState({ ...gameState, week: gameState.week + 1 });
-                      // Save action map separately using serialization
-                      if (gameState.map) {
-                        localStorage.setItem('cultGameActionMap', serializeActionMap(gameState.map));
-                      }
-                      // Save game state without map (map is saved separately)
-                      const { map, ...stateToSave } = gameState;
-                      localStorage.setItem('cultGameState', JSON.stringify(stateToSave));
-                      setView('map');
+                      const { results, updatedState } = completeWeek(assignments, actions, gameState);
+                      // Store results and show report screen
+                      setWeekResults({ results, updatedState, assignments, actions });
+                      setView('report');
                     }}
                   >
                     Complete Week's Work
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Report view
+  if (view === 'report' && weekResults) {
+    const { results, updatedState, assignments: weekAssignments, actions } = weekResults;
+
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-6">
+        {/* Header */}
+        <div className="max-w-7xl mx-auto mb-6">
+          <div className="bg-black/30 border border-amber-600/20 rounded-lg p-4">
+            <h1 className="text-2xl font-serif text-amber-300 text-center">Week {gameState?.week} - Results</h1>
+          </div>
+        </div>
+
+        {/* Results */}
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-black/40 border border-amber-600/20 rounded-lg p-8">
+            <h2 className="text-xl font-serif text-amber-300 mb-6">Events of the Week</h2>
+            
+            <div className="space-y-6">
+              {Object.entries(results).map(([actionId, outcome]) => {
+                const action = actions.find(a => a.id === actionId);
+                const followerId = weekAssignments[actionId];
+                const follower = gameState?.followers.find(f => f.id === followerId);
+
+                if (!action || !follower) return null;
+
+                return (
+                  <div key={actionId} className="border border-purple-500/30 rounded-lg p-6 bg-purple-900/10">
+                    <div className="mb-3">
+                      <h3 className="font-serif text-amber-300 text-lg">{action.title}</h3>
+                      <p className="text-sm text-amber-200/70 mt-1">{selectedLocation?.name}</p>
+                    </div>
+                    
+                    <div className="mb-4 pl-4 border-l-2 border-amber-500/30">
+                      <p className="text-amber-200">
+                        <span className="font-serif text-amber-300">{follower.name}</span>
+                        <span className="text-amber-200/60 text-sm ml-2">({follower.background})</span>
+                      </p>
+                    </div>
+
+                    <div className="bg-black/30 rounded p-4">
+                      <p className="text-amber-100">{outcome.getDescription(follower)}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Continue Button */}
+            <div className="mt-8 text-center">
+              <button 
+                className="px-8 py-4 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors text-lg"
+                onClick={() => {
+                  // Enact outcomes and save (this mutates updatedState)
+                  saveGameState(weekAssignments, results, updatedState);
+                  // Set the mutated state in React
+                  setGameState({ ...updatedState });
+                  setWeekResults(null);
+                  setAssignments({});
+                  setSelectedLocation(undefined);
+                  setView('map');
+                }}
+              >
+                Begin New Week
+              </button>
             </div>
           </div>
         </div>

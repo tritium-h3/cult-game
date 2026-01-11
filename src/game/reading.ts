@@ -1,7 +1,6 @@
-import { transliterate } from "transliteration";
 import { CITIES } from "./world";
-import { fakerEN_US } from "@faker-js/faker";
 import { Card, GameState, Spread } from "./types";
+import { generateLeader, generateFollowers } from "./followers";
 
 interface Narrative {
   narrative: string;
@@ -62,11 +61,11 @@ export const CARD_SPREADS: Spread[] = [
     meaning: "Your initial followers",
     prompt: "The final card shows the circle. Who stands with you at the beginning?",
     cards: [
-      { id: 'devoted', name: 'The Devoted Few', description: 'Two, perhaps three. They believe utterly. Ask nothing.', mechanicalDesc: '2-3 believers, utterly committed' },
-      { id: 'curious', name: 'The Curious Circle', description: 'Four or five seekers. Intrigued but uncertain. Watching.', mechanicalDesc: '4-5 seekers, diverse but uncertain' },
-      { id: 'bound', name: 'The Bound Companions', description: 'Three souls tied to yours by blood or oath. Complicated.', mechanicalDesc: '3 with personal ties, complicated loyalty' },
-      { id: 'desperate', name: 'The Desperate', description: 'Four or five who grasp at hope. Grateful. Fragile.', mechanicalDesc: '4-5 who need what you offer, unstable' },
-      { id: 'initiated', name: 'The Initiated', description: 'Two who already walk the path. Useful. Dangerous.', mechanicalDesc: '2 who already know the occult, experienced but agenda-driven' }
+      { id: 'devoted', name: 'The Devoted Few', description: 'They believe utterly. Ask nothing.', mechanicalDesc: '3 believers, utterly committed' },
+      { id: 'curious', name: 'The Curious Circle', description: 'Intrigued but uncertain. Watching.', mechanicalDesc: '3 seekers, diverse but uncertain' },
+      { id: 'bound', name: 'The Bound Companions', description: 'Souls tied to yours by blood or oath. Complicated.', mechanicalDesc: '3 with personal ties, complicated loyalty' },
+      { id: 'desperate', name: 'The Desperate', description: 'Those who grasp at hope. Grateful. Fragile.', mechanicalDesc: '3 who need what you offer, unstable' },
+      { id: 'initiated', name: 'The Initiated', description: 'They who already walk the path. Useful. Dangerous.', mechanicalDesc: '3 who already know the occult, experienced but agenda-driven' }
     ]
   }
 ];
@@ -79,71 +78,47 @@ const ARCHETYPE_CITIES : { [key: string]: string[] } = {
   'magician': ['san-francisco', 'london', 'shanghai', 'marrakech', 'prague', 'istanbul', 'athens', 'new-orleans']
 };
 
-function generateName(cityId : string) : string {
-  const city = CITIES.find(candidate => candidate.id === cityId);
-  const faker = city?.faker || fakerEN_US;
-
-  const name = faker.person.fullName();
-  if (city?.needs_transliteration) {
-    return `${name} (${transliterate(name)})`;
-  } else {
-    return name;
-  }
-}
-
 export async function generateInitialGameState(selectedCards: Card[], cultName: string, leaderName: string): Promise<GameState> {
   // Determine starting city based on leader archetype
   const archetype : string = selectedCards[0].id;
   const possibleCities = ARCHETYPE_CITIES[archetype] || CITIES.map(city => city.id);
   const startingCity = possibleCities[Math.floor(Math.random() * possibleCities.length)];
 
+  // Generate leader with skills based on archetype
+  const leader = generateLeader(leaderName, archetype);
+
+  // Generate followers with skills based on circle type
+  const circleCard: string = selectedCards[4].id;
+  const followers = generateFollowers(circleCard, startingCity, 3);
+
   // Generate initial game state template with placeholders
-    const gameStateTemplate: GameState = {
-      cultName: cultName,
-      leader: {
-        name: leaderName,
-        background: "[LEADER_BACKGROUND]",
-        archetype: selectedCards[0].id,
-        traits: "[LEADER_TRAITS]"
+  const gameStateTemplate: GameState = {
+    cultName: cultName,
+    leader: leader,
+    discovery: {
+      type: selectedCards[1].id,
+      artifact: {
+        name: "[ARTIFACT_NAME]",
+        description: "[ARTIFACT_DESC]"
       },
-      discovery: {
-        type: selectedCards[1].id,
-        artifact: {
-          name: "[ARTIFACT_NAME]",
-          description: "[ARTIFACT_DESC]"
-        },
-        details: "[DISCOVERY_DETAILS]"
-      },
-      mystery: {
-        type: selectedCards[2].id,
-        knownRituals: ["[RITUAL_NAME]"],
-        paradigm: "[MAGIC_PARADIGM]"
-      },
-      goal: {
-        type: selectedCards[3].id,
-        description: "[GOAL_DESC]"
-      },
-      followers: [],
-      hqLocation: startingCity,
-      week: 1
-    };
+      details: "[DISCOVERY_DETAILS]"
+    },
+    mystery: {
+      type: selectedCards[2].id,
+      knownRituals: ["[RITUAL_NAME]"],
+      paradigm: "[MAGIC_PARADIGM]"
+    },
+    goal: {
+      type: selectedCards[3].id,
+      description: "[GOAL_DESC]"
+    },
+    followers: followers,
+    hqLocation: startingCity,
+    week: 1
+  };
 
-    let followerCount: number = 3;
-    let circleCard: string = selectedCards[4].id;
-
-    for (let i = 0; i < followerCount; i++) {
-      const followerName = generateName(startingCity);
-      gameStateTemplate.followers.push({
-        id: `initial-follower-${i + 1}`,
-        name: followerName,
-        background: `[FOLLOWER_${i + 1}_BACKGROUND]`,
-        location: startingCity,
-        traits: [circleCard],
-        skills: [`[FOLLOWER_${i + 1}_SKILL_1]`, `[FOLLOWER_${i + 1}_SKILL_2]`]
-      });
-    }
-    return gameStateTemplate;
-  }
+  return gameStateTemplate;
+}
 
 export async function getNarrative(selectedCards: Card[], gameStateTemplate : GameState, addToNarrative: (text: string) => void, host?: string): Promise<string | undefined> {
     const selectedCardDetails: string = selectedCards.map((card, idx) => {
@@ -177,6 +152,7 @@ Guidelines:
 - Invent details for all placeholders in the game state template
 - Be SPECIFIC: for example, "assistant professor of mathematics at University of Cairo" not "learned person", or "ancient Sumerian tablet" not "old artifact"
 - Give followers real names and concrete backgrounds
+- The leader and followers should have professions and backgrounds based on their skills
 - Choose a real city for the starting location
 - Make artifact names evocative but concrete
 - Make everything consistent with the card choices and the game state template
@@ -231,9 +207,10 @@ Guidelines:
     }
   }
 
-  export async function getGameState(narrativeText: string, gameStateTemplate: GameState): Promise<GameState | undefined> {
+  export async function getGameState(narrativeText: string, gameStateTemplate: GameState, host?: string): Promise<GameState | undefined> {
     try {
-      const response = await fetch('http://torment-nexus.local:11434/api/generate', {
+      const hostUrl = host ? `http://${host}:11434` : 'http://torment-nexus.local:11434';
+      const response = await fetch(`${hostUrl}/api/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

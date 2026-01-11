@@ -1,171 +1,133 @@
 import { Outcome, Follower, GameState, City, Action, ActionMap } from "./types";
 import { getCityById } from "./world";
 
-function researchAction(city: City): Action {
-    return new Action("research", "Research", `Search for obscure knowledge in ${city.name}'s public archives and university collections.`)
-        .addOutcome(new KnowledgeOutcome(city.id))
-        .addOutcome(new NoOutcome());
+// Outcome types for serialization
+type OutcomeData = 
+    | { type: 'NoOutcome' }
+    | { type: 'KnowledgeOutcome'; city: string }
+    | { type: 'InvitedToPerformOutcome'; city: string }
+    | { type: 'MagicalSiteFoundOutcome'; city: string };
+
+interface OutcomeWithData extends Outcome {
+    _data: OutcomeData;
 }
 
-function attendCulturalEventAction(city: City): Action {
-    return new Action("culture", "Attend Cultural Event", `Mingle with ${city.name}'s cultural elite at local events. Some may have connections to secret things.`)
-        .addOutcome(new InvitedToPerformOutcome(city.id))
-        .addOutcome(new NoOutcome());
+// Outcome factory functions - easy to define, easy to serialize
+const outcomes = {
+    noOutcome: (): OutcomeWithData => ({
+        id: "no-outcome",
+        odds: () => 1,
+        enact: () => {},
+        getDescription: (_follower: Follower) => "Nothing of note happens.",
+        _data: { type: 'NoOutcome' }
+    }),
+
+    knowledge: (city: string): OutcomeWithData => ({
+        id: `knowledge-${city}`,
+        odds: () => 1,
+        enact: () => {
+            // Implement knowledge gain logic here
+        },
+        getDescription: (_follower: Follower) => `${_follower.name} uncovers hidden knowledge.`,
+        _data: { type: 'KnowledgeOutcome', city }
+    }),
+
+    invitedToPerform: (city: string): OutcomeWithData => ({
+        id: `invited-to-perform-${city}`,
+        odds: () => 1,
+        enact: (_follower: Follower, gameState: GameState) => {
+            if (gameState.map) {
+                gameState.map[city].push(actions.perform(getCityById(city)!));
+            }
+        },
+        getDescription: (_follower: Follower) => `${_follower.name} is invited to perform.`,
+        _data: { type: 'InvitedToPerformOutcome', city }
+    }),
+
+    magicalSiteFound: (city: string): OutcomeWithData => ({
+        id: `magical-site-found-${city}`,
+        odds: () => 1,
+        enact: () => {
+            // Implement magical site discovery logic here
+        },
+        getDescription: (_follower: Follower) => `${_follower.name} discovers a magical site.`,
+        _data: { type: 'MagicalSiteFoundOutcome', city }
+    })
+};
+
+// Action factory functions - concise definitions
+const actions = {
+    research: (city: City): Action => ({
+        id: "research",
+        title: "Research",
+        description: `Search for obscure knowledge in ${city.name}'s public archives and university collections.`,
+        outcomes: [outcomes.knowledge(city.id), outcomes.noOutcome()]
+    }),
+
+    culture: (city: City): Action => ({
+        id: "culture",
+        title: "Attend Cultural Event",
+        description: `Mingle with ${city.name}'s cultural elite at local events. Some may have connections to secret things.`,
+        outcomes: [outcomes.invitedToPerform(city.id), outcomes.noOutcome()]
+    }),
+
+    explore: (city: City): Action => ({
+        id: "explore",
+        title: "Explore Historic Sites",
+        description: `Visit ${city.name}'s sites, cemeteries, forgotten places. Something may be hidden there.`,
+        outcomes: [outcomes.magicalSiteFound(city.id), outcomes.noOutcome()]
+    }),
+
+    perform: (city: City): Action => ({
+        id: "perform",
+        title: "Perform",
+        description: `Showcase your artistic talents to ${city.name}'s elite audiences.`,
+        outcomes: [outcomes.noOutcome()]
+    })
+};
+
+// Standalone serialization functions
+function serializeOutcome(outcome: Outcome): OutcomeData {
+    return (outcome as OutcomeWithData)._data;
 }
 
-function exploreHistoricSitesAction(city: City): Action {
-    return new Action("explore", "Explore Historic Sites", `Visit ${city.name}'s sites, cemeteries, forgotten places. Something may be hidden there.`)
-        .addOutcome(new MagicalSiteFoundOutcome(city.id))
-        .addOutcome(new NoOutcome());
+function serializeAction(action: Action): any {
+    return {
+        id: action.id,
+        title: action.title,
+        description: action.description,
+        outcomes: action.outcomes.map(serializeOutcome)
+    };
 }
 
-function performInCityAction(city: City) : Action {
-    return new Action("perform", "Perform", `Showcase your artistic talents to ${city.name}'s elite audiences.`)
-        .addOutcome(new NoOutcome());
-}
-
-class NoOutcome extends Outcome {
-    constructor() {
-        super("no-outcome");
-    }
-
-    odds(follower: Follower): number {
-        return 1;
-    }
-
-    enact(follower: Follower, gameState: GameState): void {
-        // No effect
-    }
-
-    getDescription(): string {
-        return "Nothing of note happens.";
-    }
-
-    serialize(): any {
-        return { type: 'NoOutcome' };
-    }
-
-    static deserialize(data: any): NoOutcome {
-        return new NoOutcome();
-    }
-}
-
-class KnowledgeOutcome extends Outcome {
-    readonly city: string;
-
-    constructor(city: string) {
-        super(`knowledge-${city}`);
-        this.city = city;
-    }
-
-    odds(follower: Follower): number {
-        return 1;
-    }
-
-    enact(follower: Follower, gameState: GameState): void {
-        // Implement knowledge gain logic here
-    }
-
-    getDescription(): string {
-        return `The follower uncovers hidden knowledge.`;
-    }
-
-    serialize(): any {
-        return { type: 'KnowledgeOutcome', city: this.city };
-    }
-
-    static deserialize(data: any): KnowledgeOutcome {
-        return new KnowledgeOutcome(data.city);
-    }
-}
-
-class InvitedToPerformOutcome extends Outcome {
-    readonly city: string;
-
-    constructor(city: string) {
-        super(`invited-to-perform-${city}`);
-        this.city = city;
-    }
-
-    odds(follower: Follower): number {
-        return 1;
-    }
-
-    enact(follower: Follower, gameState: GameState): void {
-        if (gameState.map) {
-            gameState.map[this.city].push(performInCityAction(getCityById(this.city)!));
-        }
-    }
-
-    getDescription(): string {
-        return `The follower is invited to perform.`;
-    }
-
-    serialize(): any {
-        return { type: 'InvitedToPerformOutcome', city: this.city };
-    }
-
-    static deserialize(data: any): InvitedToPerformOutcome {
-        return new InvitedToPerformOutcome(data.city);
-    }
-}
-
-class MagicalSiteFoundOutcome extends Outcome {
-    readonly city: string;
-
-    constructor(city: string) {
-        super(`magical-site-found-${city}`);
-        this.city = city;
-    }
-
-    odds(follower: Follower): number {
-        return 1;
-    }
-
-    enact(follower: Follower, gameState: GameState): void {
-        // Implement magical site discovery logic here
-    }
-
-    getDescription(): string {
-        return `The follower discovers a magical site.`;
-    }
-
-    serialize(): any {
-        return { type: 'MagicalSiteFoundOutcome', city: this.city };
-    }
-
-    static deserialize(data: any): MagicalSiteFoundOutcome {
-        return new MagicalSiteFoundOutcome(data.city);
-    }
-}
-
-// Override the base Outcome.deserialize to dispatch to the correct subclass
-Outcome.deserialize = function(data: any): Outcome {
+// Deserialization registry
+function deserializeOutcome(data: OutcomeData): OutcomeWithData {
     switch (data.type) {
         case 'NoOutcome':
-            return NoOutcome.deserialize(data);
+            return outcomes.noOutcome();
         case 'KnowledgeOutcome':
-            return KnowledgeOutcome.deserialize(data);
+            return outcomes.knowledge(data.city);
         case 'InvitedToPerformOutcome':
-            return InvitedToPerformOutcome.deserialize(data);
+            return outcomes.invitedToPerform(data.city);
         case 'MagicalSiteFoundOutcome':
-            return MagicalSiteFoundOutcome.deserialize(data);
-        default:
-            throw new Error(`Unknown outcome type: ${data.type}`);
+            return outcomes.magicalSiteFound(data.city);
     }
-};
+}
+
+function deserializeAction(data: any): Action {
+    return {
+        id: data.id,
+        title: data.title,
+        description: data.description,
+        outcomes: data.outcomes.map(deserializeOutcome)
+    };
+}
 
 export function prototypeActionsForCity(city: City): Action[] {
     return [
-        new Action("research", "Research", `Search for obscure knowledge in ${city.name}'s public archives and university collections.`)
-            .addOutcome(new KnowledgeOutcome(city.id))
-            .addOutcome(new NoOutcome()),
-        new Action("culture", "Attend Cultural Event", `Mingle with ${city.name}'s cultural elite at local events. Some may have connections to secret things.`)
-            .addOutcome(new InvitedToPerformOutcome(city.id))
-            .addOutcome(new NoOutcome()),
-        new Action("explore", "Explore Historic Sites", `Visit ${city.name}'s sites, cemeteries, forgotten places. Something may be hidden there.`)
-            .addOutcome(new MagicalSiteFoundOutcome(city.id))
-            .addOutcome(new NoOutcome()),
+        actions.research(city),
+        actions.culture(city),
+        actions.explore(city)
     ];
 }
 
@@ -219,7 +181,7 @@ export function enactCityActions(assignments: { [actionId: string]: string }, re
 export function serializeActionMap(map: ActionMap): string {
     const serialized: Record<string, any[]> = {};
     for (const [cityId, actions] of Object.entries(map)) {
-        serialized[cityId] = actions.map(action => action.serialize());
+        serialized[cityId] = actions.map(serializeAction);
     }
     return JSON.stringify(serialized);
 }
@@ -228,7 +190,46 @@ export function deserializeActionMap(json: string): ActionMap {
     const parsed: Record<string, any[]> = JSON.parse(json);
     const map: ActionMap = {};
     for (const [cityId, serializedActions] of Object.entries(parsed)) {
-        map[cityId] = serializedActions.map(data => Action.deserialize(data));
+        map[cityId] = serializedActions.map(deserializeAction);
     }
     return map;
+}
+
+/**
+ * Complete a week's work: perform actions and increment week
+ * Does NOT enact outcomes - that happens in saveGameState
+ * @returns Object with results and updated game state
+ */
+export function completeWeek(
+    assignments: Record<string, string>,
+    actions: Action[],
+    gameState: GameState
+): { results: Record<string, Outcome>; updatedState: GameState } {
+    // Perform actions to determine outcomes
+    const results = performCityActions(assignments, actions, gameState);
+    
+    // Update week counter
+    const updatedState = { ...gameState, week: gameState.week + 1 };
+    
+    return { results, updatedState };
+}
+
+/**
+ * Enact outcomes and persist game state to localStorage
+ */
+export function saveGameState(
+    assignments: Record<string, string>,
+    results: Record<string, Outcome>,
+    gameState: GameState
+): void {
+    // Enact the outcomes (mutates gameState)
+    enactCityActions(assignments, results, gameState);
+    
+    // Save action map separately using serialization
+    if (gameState.map) {
+        localStorage.setItem('cultGameActionMap', serializeActionMap(gameState.map));
+    }
+    // Save game state without map (map is saved separately)
+    const { map, ...stateToSave } = gameState;
+    localStorage.setItem('cultGameState', JSON.stringify(stateToSave));
 }

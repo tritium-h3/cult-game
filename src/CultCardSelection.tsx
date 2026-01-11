@@ -66,7 +66,7 @@ export default function CultCardSelection() {
     
     console.log('Generated game state template:', gameStateTemplate);
     const narrativeText = await getNarrative(selectedCardsData, gameStateTemplate, addToNarrative, window.location.hostname);
-    const gameState = await getGameState(narrativeText || '', gameStateTemplate);
+    const gameState = await getGameState(narrativeText || '', gameStateTemplate, window.location.hostname);
     
     if (gameState) {
       // Ensure the names from form are preserved
