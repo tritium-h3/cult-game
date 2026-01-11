@@ -151,6 +151,7 @@ Your task is to write a concrete 2-paragraph narrative (under 150 words) in seco
 Guidelines:
 - Invent details for all placeholders in the game state template
 - Be SPECIFIC: for example, "assistant professor of mathematics at University of Cairo" not "learned person", or "ancient Sumerian tablet" not "old artifact"
+- If and when you use fictional names, make them unique to the setting. Do not use the work of other authors (e.g. "Azathoth" is WRONG. Any name you make up is okay.)
 - Give followers real names and concrete backgrounds
 - The leader and followers should have professions and backgrounds based on their skills
 - Choose a real city for the starting location
@@ -234,8 +235,7 @@ Return the full game state as valid JSON. ONLY return the JSON, do NOT include a
 Ensure that:
 - All placeholders are filled in with specific details from the narrative (if they exist). If they don't exist in the narrative, create plausible details consistent with the narrative.
 - The JSON structure is preserved and valid.
-- Leader traits should be 2-3 adjectives in an array like ["scholarly", "obsessive"]
-- Follower skills should be 1-2 concrete skills in an array like ["research", "persuasion"]
+- Placeholder fields are in square breackets (e.g., "[ARTIFACT_NAME]"). ONLY replace those fields. Make NO OTHER changes to the structure or field names.
 `,
           stream: false,
           format: 'json', // This tells Ollama to enforce JSON output
