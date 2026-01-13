@@ -253,16 +253,17 @@ export default function CultGameInterface() {
 
         {/* Location Board */}
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-3 gap-6">
+          <div className="grid grid-cols-4 gap-4">
             {/* Adherents Panel */}
             <div className="col-span-1">
-              <div 
-                className="bg-black/40 border border-amber-600/20 rounded-lg p-6"
-                onDragOver={handleDragOver}
-                onDrop={handleDropToUnassign}
-              >
-                <h2 className="text-lg font-serif text-amber-300 mb-4">Adherents</h2>
-                <div className="space-y-3">
+              <div className="bg-black/40 border border-amber-600/20 rounded-lg p-4">
+                <h2 className="text-sm font-serif text-amber-300 mb-3">Adherents</h2>
+                <div 
+                  className="space-y-2 overflow-y-auto pr-2"
+                  style={{ maxHeight: 'calc(100vh - 280px)' }}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDropToUnassign}
+                >
                   {gameState.followers.map((follower, idx) => {
                     const isAssigned = Object.values(assignments).includes(follower.id);
                     
@@ -271,23 +272,23 @@ export default function CultGameInterface() {
                         key={idx}
                         draggable={!isAssigned}
                         onDragStart={(e) => handleDragStart(e, follower.id)}
-                        className={`bg-purple-900/20 border border-amber-500/20 rounded-lg p-3 transition-all ${
+                        className={`bg-purple-900/20 border border-amber-500/20 rounded p-2 transition-all text-xs ${
                           !isAssigned 
                             ? 'cursor-move hover:border-amber-500/40 hover:shadow-lg' 
                             : 'opacity-40 cursor-not-allowed'
                         }`}
                       >
-                        <p className="font-serif text-amber-200">{follower.name}</p>
-                        <p className="text-xs text-amber-200/60 mt-1">{follower.background}</p>
-                        <div className="flex gap-2 mt-2">
+                        <p className="font-serif text-amber-200 text-sm">{follower.name}</p>
+                        <p className="text-xs text-amber-200/60 mt-0.5 line-clamp-1">{follower.background}</p>
+                        <div className="flex flex-wrap gap-1 mt-1.5">
                           {Array.isArray(follower.skills) ? follower.skills.map((skill, i) => (
-                            <span key={i} className="text-xs px-2 py-1 bg-amber-800/30 rounded text-amber-300">
+                            <span key={i} className="text-xs px-1.5 py-0.5 bg-amber-800/30 rounded text-amber-300">
                               {skill}
                             </span>
                           )) : null}
                         </div>
                         {isAssigned && (
-                          <p className="text-xs text-amber-400 mt-2 italic">Currently assigned</p>
+                          <p className="text-xs text-amber-400 mt-1.5 italic">Assigned</p>
                         )}
                       </div>
                     );
@@ -297,11 +298,11 @@ export default function CultGameInterface() {
             </div>
 
             {/* Actions Panel */}
-            <div className="col-span-2">
-              <div className="bg-black/40 border border-amber-600/20 rounded-lg p-6">
-                <h2 className="text-lg font-serif text-amber-300 mb-4">Available Actions</h2>
+            <div className="col-span-3">
+              <div className="bg-black/40 border border-amber-600/20 rounded-lg p-4">
+                <h2 className="text-sm font-serif text-amber-300 mb-3">Available Actions</h2>
                 
-                <div className="space-y-4">
+                <div className="space-y-3 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
                   {actions.map((action, actionIdx) => {
                     const assignedFollowerId = assignments[action.id];
                     const assignedFollower = assignedFollowerId !== undefined 
@@ -309,14 +310,14 @@ export default function CultGameInterface() {
                       : null;
 
                     return (
-                      <div key={actionIdx} className="border border-purple-500/30 rounded-lg p-4 bg-purple-900/10">
-                        <h3 className="font-serif text-amber-300 mb-2">{action.title}</h3>
-                        <p className="text-sm text-amber-200/70 mb-3">{action.description}</p>
+                      <div key={actionIdx} className="border border-purple-500/30 rounded-lg p-3 bg-purple-900/10">
+                        <h3 className="font-serif text-amber-300 text-sm mb-1">{action.title}</h3>
+                        <p className="text-xs text-amber-200/70 mb-2 line-clamp-2">{action.description}</p>
                         
                         <div 
                           onDragOver={handleDragOver}
                           onDrop={(e) => handleDrop(e, action.id)}
-                          className={`border-2 border-dashed rounded p-4 min-h-20 transition-colors ${
+                          className={`border-2 border-dashed rounded p-2 min-h-16 transition-colors ${
                             assignedFollower 
                               ? 'border-amber-500/60 bg-amber-900/10' 
                               : 'border-amber-500/30'
@@ -326,16 +327,16 @@ export default function CultGameInterface() {
                             <div 
                               draggable
                               onDragStart={(e) => handleDragStart(e, assignedFollower.id, action.id)}
-                              className="cursor-move hover:bg-amber-900/20 transition-colors rounded p-2 -m-2"
+                              className="cursor-move hover:bg-amber-900/20 transition-colors rounded p-1.5 -m-1.5"
                             >
                               <div className="flex items-start justify-between">
-                                <div>
-                                  <p className="font-serif text-amber-200">{assignedFollower.name}</p>
-                                  <p className="text-xs text-amber-200/60 mt-1">{assignedFollower.background}</p>
-                                  <div className="flex gap-2 mt-2">
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-serif text-amber-200 text-sm">{assignedFollower.name}</p>
+                                  <p className="text-xs text-amber-200/60 mt-0.5 line-clamp-1">{assignedFollower.background}</p>
+                                  <div className="flex flex-wrap gap-1 mt-1.5">
                                     {Array.isArray(assignedFollower.skills) 
                                       ? assignedFollower.skills.map((skill, i) => (
-                                        <span key={i} className="text-xs px-2 py-1 bg-amber-800/30 rounded text-amber-300">
+                                        <span key={i} className="text-xs px-1.5 py-0.5 bg-amber-800/30 rounded text-amber-300">
                                           {skill}
                                         </span>
                                       )) 
@@ -344,7 +345,7 @@ export default function CultGameInterface() {
                                 </div>
                                 <button 
                                   onClick={() => handleRemoveAssignment(actionIdx)}
-                                  className="text-xs text-amber-400 hover:text-amber-300 underline"
+                                  className="text-xs text-amber-400 hover:text-amber-300 underline ml-2 flex-shrink-0"
                                 >
                                   Remove
                                 </button>
@@ -352,7 +353,7 @@ export default function CultGameInterface() {
                             </div>
                           ) : (
                             <div className="text-center flex items-center justify-center h-full">
-                              <p className="text-sm text-amber-300/50">Drag an adherent here to assign</p>
+                              <p className="text-xs text-amber-300/50">Drag adherent here</p>
                             </div>
                           )}
                         </div>
@@ -362,9 +363,9 @@ export default function CultGameInterface() {
                 </div>
 
                 {/* Process Week Button */}
-                <div className="mt-6 text-center">
+                <div className="mt-4 text-center">
                   <button 
-                    className="px-6 py-3 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
+                    className="px-4 py-2 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors text-sm"
                     onClick={() => {
                       const { results, updatedState } = completeWeek(assignments, actions, gameState);
                       // Store results and show report screen
