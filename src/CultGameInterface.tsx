@@ -302,7 +302,7 @@ export default function CultGameInterface() {
               <div className="bg-black/40 border border-amber-600/20 rounded-lg p-4">
                 <h2 className="text-sm font-serif text-amber-300 mb-3">Available Actions</h2>
                 
-                <div className="space-y-3 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+                <div className="grid grid-cols-2 gap-3 overflow-y-auto pr-2" style={{ maxHeight: 'calc(100vh - 280px)' }}>
                   {actions.map((action, actionIdx) => {
                     const assignedFollowerId = assignments[action.id];
                     const assignedFollower = assignedFollowerId !== undefined 
