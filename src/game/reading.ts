@@ -78,11 +78,13 @@ const ARCHETYPE_CITIES : { [key: string]: string[] } = {
   'magician': ['san-francisco', 'london', 'shanghai', 'marrakech', 'prague', 'istanbul', 'athens', 'new-orleans']
 };
 
-export async function generateInitialGameState(selectedCards: Card[], cultName: string, leaderName: string): Promise<GameState> {
-  // Determine starting city based on leader archetype
+export async function generateInitialGameState(selectedCards: Card[], cultName: string, leaderName: string, cityId?: string): Promise<GameState> {
+  // Determine starting city based on leader archetype or use provided city
   const archetype : string = selectedCards[0].id;
   const possibleCities = ARCHETYPE_CITIES[archetype] || CITIES.map(city => city.id);
-  const startingCity = possibleCities[Math.floor(Math.random() * possibleCities.length)];
+  const startingCity = cityId || possibleCities[Math.floor(Math.random() * possibleCities.length)];
+  
+  console.log('generateInitialGameState: using city', startingCity, cityId ? '(provided)' : '(random)');
 
   // Generate leader with skills based on archetype
   const leader = generateLeader(leaderName, archetype);

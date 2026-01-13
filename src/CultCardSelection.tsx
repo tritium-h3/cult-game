@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { Sparkles, User, Users } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Sparkles, User, Users, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import './Game.css';
 import { CARD_SPREADS, generateInitialGameState, getNarrative, getGameState } from './game/reading';
 import { Card, GameState, Spread } from './game/types';
+import { getCityById, CITIES } from './game/world';
 
 export default function CultCardSelection() {
   const [currentSpread, setCurrentSpread] = useState<number>(0);
@@ -15,6 +16,45 @@ export default function CultCardSelection() {
   const [readingState, setNarrativeState] = useState<'selection' | 'naming' | 'narrating' | 'ready'>('selection');
   const [cultName, setCultName] = useState('');
   const [leaderName, setLeaderName] = useState('');
+  const [selectedCity, setSelectedCity] = useState<string>('');
+  const [hasUserSetName, setHasUserSetName] = useState(false);
+
+  // When entering naming state, initialize city and generate suggested name
+  useEffect(() => {
+    if (readingState === 'naming' && !selectedCity) {
+      // Pick random city based on archetype
+      const archetype = selectedCards[0]; // The Seeker card
+      const archetypeId = CARD_SPREADS[0].cards.find(c => c.id === archetype)?.id || 'hermit';
+      
+      // Import the ARCHETYPE_CITIES logic from reading.ts
+      const archetypeCities: { [key: string]: string[] } = {
+        'fool': ['san-francisco', 'shanghai', 'london', 'new-orleans', 'mexico-city', 'istanbul', 'sedona'],
+        'hanged': ['varanasi', 'kyoto', 'jerusalem', 'sedona', 'athens', 'santa-fe', 'cairo'],
+        'hermit': ['alexandria', 'edinburgh', 'prague', 'krakow', 'london', 'kyoto', 'istanbul', 'athens'],
+        'tower': ['new-orleans', 'salem', 'edinburgh', 'reykjavik', 'mexico-city', 'cairo', 'jerusalem'],
+        'magician': ['san-francisco', 'london', 'shanghai', 'marrakech', 'prague', 'istanbul', 'athens', 'new-orleans']
+      };
+      
+      const possibleCities = archetypeCities[archetypeId] || CITIES.map(city => city.id);
+      const randomCity = possibleCities[Math.floor(Math.random() * possibleCities.length)];
+      
+      console.log('Initial city selection:', randomCity, 'for archetype:', archetypeId);
+      setSelectedCity(randomCity);
+    }
+  }, [readingState, selectedCards, selectedCity]);
+
+  // When city changes, generate a new suggested name (if user hasn't customized it)
+  useEffect(() => {
+    if (selectedCity && !hasUserSetName) {
+      const city = getCityById(selectedCity);
+      if (city) {
+        const faker = city.faker;
+        const suggestedName = faker.person.fullName();
+        console.log('Suggesting name:', suggestedName, 'for city:', selectedCity);
+        setLeaderName(suggestedName);
+      }
+    }
+  }, [selectedCity, hasUserSetName]);
 
   const handleCardClick = (cardId: string) => {
     if (flippedCard === cardId) {
@@ -44,6 +84,8 @@ export default function CultCardSelection() {
       setGameState({} as GameState);
       setCultName('');
       setLeaderName('');
+      setSelectedCity('');
+      setHasUserSetName(false);
   }
 
   function addToNarrative(text: string) {
@@ -59,7 +101,7 @@ export default function CultCardSelection() {
       return card;
     });
 
-    const gameStateTemplate = await generateInitialGameState(selectedCardsData, cultName.trim(), leaderName.trim());
+    const gameStateTemplate = await generateInitialGameState(selectedCardsData, cultName.trim(), leaderName.trim(), selectedCity);
     // Update template with user-provided names
     gameStateTemplate.cultName = cultName.trim();
     gameStateTemplate.leader.name = leaderName.trim();
@@ -112,6 +154,26 @@ export default function CultCardSelection() {
           <form onSubmit={handleNameSubmit} className="space-y-8">
             <div className="bg-black/40 border-2 border-amber-600/30 rounded-lg p-8 backdrop-blur">
               <div className="mb-6">
+                <label htmlFor="city" className="flex items-center gap-2 text-amber-300 mb-2">
+                  <MapPin className="w-5 h-5" />
+                  <span className="text-lg font-serif">The City</span>
+                </label>
+                <select
+                  id="city"
+                  value={selectedCity}
+                  onChange={(e) => setSelectedCity(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-900/50 border border-amber-600/30 rounded text-amber-100 focus:outline-none focus:border-amber-500/50 transition-colors"
+                >
+                  {CITIES.map(city => (
+                    <option key={city.id} value={city.id}>
+                      {city.name} — {city.flavor}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-amber-300/50 mt-2">Where will your journey begin?</p>
+              </div>
+
+              <div className="mb-6">
                 <label htmlFor="cult-name" className="flex items-center gap-2 text-amber-300 mb-2">
                   <Users className="w-5 h-5" />
                   <span className="text-lg font-serif">The Cult</span>
@@ -133,15 +195,36 @@ export default function CultCardSelection() {
                   <User className="w-5 h-5" />
                   <span className="text-lg font-serif">The Leader</span>
                 </label>
-                <input
-                  id="leader-name"
-                  type="text"
-                  value={leaderName}
-                  onChange={(e) => setLeaderName(e.target.value)}
-                  placeholder="Margot Ashford..."
-                  className="w-full px-4 py-3 bg-slate-900/50 border border-amber-600/30 rounded text-amber-100 placeholder-amber-300/30 focus:outline-none focus:border-amber-500/50 transition-colors"
-                  maxLength={100}
-                />
+                <div className="flex gap-2">
+                  <input
+                    id="leader-name"
+                    type="text"
+                    value={leaderName}
+                    onChange={(e) => {
+                      setLeaderName(e.target.value);
+                      setHasUserSetName(true);
+                    }}
+                    placeholder="Margot Ashford..."
+                    className="flex-1 px-4 py-3 bg-slate-900/50 border border-amber-600/30 rounded text-amber-100 placeholder-amber-300/30 focus:outline-none focus:border-amber-500/50 transition-colors"
+                    maxLength={100}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const city = getCityById(selectedCity);
+                      if (city) {
+                        const newName = city.faker.person.fullName();
+                        setLeaderName(newName);
+                        setHasUserSetName(false);
+                        console.log('Generated new suggested name:', newName);
+                      }
+                    }}
+                    className="px-4 py-3 bg-purple-800/50 hover:bg-purple-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors whitespace-nowrap"
+                    title="Generate a new name suggestion"
+                  >
+                    <Sparkles className="w-5 h-5" />
+                  </button>
+                </div>
                 <p className="text-xs text-amber-300/50 mt-2">What name shall you be known by?</p>
               </div>
             </div>
@@ -153,6 +236,8 @@ export default function CultCardSelection() {
                   setNarrativeState('selection');
                   setCultName('');
                   setLeaderName('');
+                  setSelectedCity('');
+                  setHasUserSetName(false);
                 }}
                 className="px-6 py-3 bg-slate-800/50 hover:bg-slate-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
               >
