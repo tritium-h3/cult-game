@@ -89,7 +89,7 @@ export interface Action {
 
 export interface Outcome {
     id: string;
-    odds(follower: Follower): number;
+    odds(follower: Follower, gameState: GameState): number;
     enact(follower: Follower, gameState: GameState): void;
     getDescription(follower: Follower): string;
 }

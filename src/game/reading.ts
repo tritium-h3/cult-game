@@ -151,7 +151,7 @@ Your task is to write a concrete 2-paragraph narrative (under 150 words) in seco
 Guidelines:
 - Invent details for all placeholders in the game state template
 - Be SPECIFIC: for example, "assistant professor of mathematics at University of Cairo" not "learned person", or "ancient Sumerian tablet" not "old artifact"
-- If and when you use fictional names, make them unique to the setting. Do not use the work of other authors (e.g. "Azathoth" is WRONG. Any name you make up is okay.)
+- If and when you use fictional names, make them unique to the setting, or based on real folklore or mythology. Do not use the work of other authors (e.g. "Azathoth" is WRONG. "Quetzalcoatl" is better. A made-up name is okay.)
 - Give followers real names and concrete backgrounds
 - The leader and followers should have professions and backgrounds based on their skills
 - Choose a real city for the starting location
