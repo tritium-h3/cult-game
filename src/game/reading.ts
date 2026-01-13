@@ -78,6 +78,47 @@ const ARCHETYPE_CITIES : { [key: string]: string[] } = {
   'magician': ['san-francisco', 'london', 'shanghai', 'marrakech', 'prague', 'istanbul', 'athens', 'new-orleans']
 };
 
+export function generateCultName(mysteryId: string, horizonId: string): string {
+  // Mystery-based descriptors
+  const mysteryDescriptors: { [key: string]: string[] } = {
+    'eye': ['Watching', 'Vigilant', 'Observant', 'Seeing', 'Witnessed'],
+    'words': ['Hidden', 'Arcane', 'Veiled', 'Esoteric', 'Sacred'],
+    'bleeding': ['Threshold', 'Liminal', 'Between', 'Torn', 'Pierced'],
+    'pact': ['Ancient', 'Bound', 'Sworn', 'Covenanted', 'Sealed'],
+    'transformation': ['Transcendent', 'Metamorphic', 'Ascending', 'Evolved', 'Chrysalis']
+  };
+  
+  // Horizon-based nouns/themes
+  const horizonNouns: { [key: string]: string[] } = {
+    'crown': ['Dominion', 'Sovereignty', 'Empire', 'Throne', 'Authority'],
+    'key': ['Knowledge', 'Mysteries', 'Secrets', 'Truth', 'Wisdom'],
+    'doorway': ['Threshold', 'Gate', 'Passage', 'Beyond', 'Transcendence'],
+    'shield': ['Vigil', 'Ward', 'Sanctuary', 'Refuge', 'Aegis'],
+    'dawn': ['Renewal', 'Genesis', 'Awakening', 'Emergence', 'New Age']
+  };
+  
+  // Cult name prefixes
+  const prefixes = [
+    'The Order of',
+    'The Circle of',
+    'The Seekers of',
+    'The Children of',
+    'The Disciples of',
+    'The Covenant of',
+    'The Brotherhood of',
+    'The Society of'
+  ];
+  
+  const descriptors = mysteryDescriptors[mysteryId] || ['Hidden'];
+  const nouns = horizonNouns[horizonId] || ['Truth'];
+  
+  const descriptor = descriptors[Math.floor(Math.random() * descriptors.length)];
+  const noun = nouns[Math.floor(Math.random() * nouns.length)];
+  const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+  
+  return `${prefix} the ${descriptor} ${noun}`;
+}
+
 export async function generateInitialGameState(selectedCards: Card[], cultName: string, leaderName: string, cityId?: string): Promise<GameState> {
   // Determine starting city based on leader archetype or use provided city
   const archetype : string = selectedCards[0].id;

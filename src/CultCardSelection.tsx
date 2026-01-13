@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Sparkles, User, Users, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import './Game.css';
-import { CARD_SPREADS, generateInitialGameState, getNarrative, getGameState } from './game/reading';
+import { CARD_SPREADS, generateInitialGameState, getNarrative, getGameState, generateCultName } from './game/reading';
 import { Card, GameState, Spread } from './game/types';
 import { getCityById, CITIES } from './game/world';
 
@@ -18,6 +18,7 @@ export default function CultCardSelection() {
   const [leaderName, setLeaderName] = useState('');
   const [selectedCity, setSelectedCity] = useState<string>('');
   const [hasUserSetName, setHasUserSetName] = useState(false);
+  const [hasUserSetCultName, setHasUserSetCultName] = useState(false);
 
   // When entering naming state, initialize city and generate suggested name
   useEffect(() => {
@@ -56,6 +57,17 @@ export default function CultCardSelection() {
     }
   }, [selectedCity, hasUserSetName]);
 
+  // Initialize cult name when entering naming state
+  useEffect(() => {
+    if (readingState === 'naming' && !hasUserSetCultName && selectedCards.length >= 4) {
+      const mysteryId = selectedCards[2]; // The Mystery card (index 2)
+      const horizonId = selectedCards[3]; // The Horizon card (index 3)
+      const suggestedCultName = generateCultName(mysteryId, horizonId);
+      console.log('Suggesting cult name:', suggestedCultName);
+      setCultName(suggestedCultName);
+    }
+  }, [readingState, selectedCards, hasUserSetCultName]);
+
   const handleCardClick = (cardId: string) => {
     if (flippedCard === cardId) {
       // Confirm selection
@@ -86,6 +98,7 @@ export default function CultCardSelection() {
       setLeaderName('');
       setSelectedCity('');
       setHasUserSetName(false);
+      setHasUserSetCultName(false);
   }
 
   function addToNarrative(text: string) {
@@ -178,15 +191,35 @@ export default function CultCardSelection() {
                   <Users className="w-5 h-5" />
                   <span className="text-lg font-serif">The Cult</span>
                 </label>
-                <input
-                  id="cult-name"
-                  type="text"
-                  value={cultName}
-                  onChange={(e) => setCultName(e.target.value)}
-                  placeholder="The Order of the Veiled Truth..."
-                  className="w-full px-4 py-3 bg-slate-900/50 border border-amber-600/30 rounded text-amber-100 placeholder-amber-300/30 focus:outline-none focus:border-amber-500/50 transition-colors"
-                  maxLength={100}
-                />
+                <div className="flex gap-2">
+                  <input
+                    id="cult-name"
+                    type="text"
+                    value={cultName}
+                    onChange={(e) => {
+                      setCultName(e.target.value);
+                      setHasUserSetCultName(true);
+                    }}
+                    placeholder="The Order of the Veiled Truth..."
+                    className="flex-1 px-4 py-3 bg-slate-900/50 border border-amber-600/30 rounded text-amber-100 placeholder-amber-300/30 focus:outline-none focus:border-amber-500/50 transition-colors"
+                    maxLength={100}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const mysteryId = selectedCards[2];
+                      const horizonId = selectedCards[3];
+                      const newCultName = generateCultName(mysteryId, horizonId);
+                      setCultName(newCultName);
+                      setHasUserSetCultName(false);
+                      console.log('Generated new cult name:', newCultName);
+                    }}
+                    className="px-4 py-3 bg-purple-800/50 hover:bg-purple-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors whitespace-nowrap"
+                    title="Generate a new cult name suggestion"
+                  >
+                    <Sparkles className="w-5 h-5" />
+                  </button>
+                </div>
                 <p className="text-xs text-amber-300/50 mt-2">What will they call your congregation?</p>
               </div>
 
@@ -238,6 +271,7 @@ export default function CultCardSelection() {
                   setLeaderName('');
                   setSelectedCity('');
                   setHasUserSetName(false);
+                  setHasUserSetCultName(false);
                 }}
                 className="px-6 py-3 bg-slate-800/50 hover:bg-slate-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
               >
