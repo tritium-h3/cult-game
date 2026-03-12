@@ -89,7 +89,8 @@ const outcomes = {
                 background: "[GENERATED_BACKGROUND]",
                 location: _follower.location,
                 traits: [],
-                skills: skills
+                skills: skills,
+                slots: 1
             };
             gameState.followers.push(newFollower);
         },
@@ -117,6 +118,7 @@ export const actions = {
     
     attendCulturalEvents: (city: City): Action => ({
         id: "attend-cultural-events",
+        type: 'site',
         title: "Attend Cultural Events",
         description: `Mingle with ${city.name}'s cultural scene at galleries, readings, and performances.`,
         outcomes: [
@@ -147,6 +149,7 @@ export const actions = {
 
     researchAtLibraries: (city: City): Action => ({
         id: "research-at-libraries",
+        type: 'book',
         title: "Research at Libraries",
         description: `Search ${city.name}'s public archives and university collections for occult knowledge.`,
         outcomes: [
@@ -177,6 +180,7 @@ export const actions = {
 
     exploreHistoricSites: (city: City): Action => ({
         id: "explore-historic-sites",
+        type: 'site',
         title: "Explore Historic Sites",
         description: `Visit ${city.name}'s old churches, cemeteries, and forgotten places.`,
         outcomes: [
@@ -204,6 +208,7 @@ export const actions = {
 
     visitCoffeeShops: (city: City): Action => ({
         id: "visit-coffee-shops",
+        type: 'patron',
         title: "Visit Coffee Shops",
         description: `Network in ${city.name}'s cafes and intellectual hangouts.`,
         outcomes: [
@@ -232,6 +237,7 @@ export const actions = {
     
     performAtOpenMic: (city: City): Action => ({
         id: "perform-at-open-mic",
+        type: 'patron',
         title: "Perform at Open Mic Night",
         description: `Showcase your talents to ${city.name}'s artistic community.`,
         outcomes: [
@@ -258,6 +264,7 @@ export const actions = {
 
     joinArtCollective: (city: City): Action => ({
         id: "join-art-collective",
+        type: 'patron',
         title: "Join Art Collective",
         description: `Become part of ${city.name}'s underground art scene.`,
         outcomes: [
@@ -281,6 +288,7 @@ export const actions = {
 
     studyForbiddenSection: (city: City): Action => ({
         id: "study-forbidden-section",
+        type: 'book',
         title: "Study Forbidden Section",
         description: `Access ${city.name}'s restricted occult texts.`,
         outcomes: [
@@ -318,6 +326,7 @@ export const actions = {
 
     interviewLocalHistorians: (city: City): Action => ({
         id: "interview-local-historians",
+        type: 'patron',
         title: "Interview Local Historians",
         description: `Speak with ${city.name}'s historians about local legends and forgotten history.`,
         outcomes: [
@@ -348,6 +357,7 @@ export const actions = {
 
     investigateOldChurch: (city: City): Action => ({
         id: "investigate-old-church",
+        type: 'site',
         title: "Investigate Old Church",
         description: `Explore an abandoned church in ${city.name} with a dark reputation.`,
         outcomes: [
@@ -375,6 +385,7 @@ export const actions = {
 
     mapUndergroundTunnels: (city: City): Action => ({
         id: "map-underground-tunnels",
+        type: 'site',
         title: "Map Underground Tunnels",
         description: `Navigate ${city.name}'s forgotten underground passages.`,
         outcomes: [
@@ -404,6 +415,7 @@ export const actions = {
 
     recruitSympatheticStudent: (city: City): Action => ({
         id: "recruit-sympathetic-student",
+        type: 'patron',
         title: "Recruit Sympathetic Student",
         description: `Bring a curious student into your circle.`,
         outcomes: [
@@ -433,6 +445,7 @@ export const actions = {
 
     befriendOccultBookshopOwner: (city: City): Action => ({
         id: "befriend-occult-bookshop-owner",
+        type: 'patron',
         title: "Befriend Occult Bookshop Owner",
         description: `Build a relationship with ${city.name}'s occult underground.`,
         outcomes: [
@@ -465,6 +478,7 @@ export const actions = {
 
     organizePrivateSalon: (city: City): Action => ({
         id: "organize-private-salon",
+        type: 'patron',
         title: "Organize Private Salon",
         description: `Host intimate gatherings to share esoteric ideas.`,
         outcomes: [
@@ -497,6 +511,7 @@ export const actions = {
 
     accessUniversityArchives: (city: City): Action => ({
         id: "access-university-archives",
+        type: 'book',
         title: "Access University Archives",
         description: `Dive into ${city.name}'s academic occult collections.`,
         outcomes: [
@@ -524,6 +539,7 @@ export const actions = {
 
     accessSealedBasement: (city: City): Action => ({
         id: "access-sealed-basement",
+        type: 'site',
         title: "Access Sealed Basement",
         description: `Enter the sealed space beneath the old church.`,
         outcomes: [
@@ -556,6 +572,7 @@ export const actions = {
 
     discoverHiddenChamber: (city: City): Action => ({
         id: "discover-hidden-chamber",
+        type: 'site',
         title: "Discover Hidden Chamber",
         description: `Uncover a sealed chamber in the tunnels.`,
         outcomes: [
@@ -582,6 +599,7 @@ export const actions = {
 
     purchaseRareTexts: (city: City): Action => ({
         id: "purchase-rare-texts",
+        type: 'artifact',
         title: "Purchase Rare Texts",
         description: `Acquire forbidden books from private collections.`,
         outcomes: [
@@ -609,6 +627,7 @@ export const actions = {
 
     organizeExhibition: (city: City): Action => ({
         id: "organize-exhibition",
+        type: 'artifact',
         title: "Organize Exhibition",
         description: `Mount a public exhibition of esoteric art.`,
         outcomes: [
@@ -636,6 +655,7 @@ export const actions = {
 
     attemptTranslation: (city: City): Action => ({
         id: "attempt-translation",
+        type: 'book',
         title: "Attempt Translation of Ancient Text",
         description: `Translate obscure texts written in dead languages.`,
         outcomes: [
@@ -665,6 +685,7 @@ export const actions = {
 
     establishDiscussionGroup: (city: City): Action => ({
         id: "establish-discussion-group",
+        type: 'patron',
         title: "Establish Discussion Group",
         description: `Formalize your followers into a cohesive group.`,
         outcomes: [
@@ -693,6 +714,7 @@ export const actions = {
 
     researchOccultSocieties: (city: City): Action => ({
         id: "research-occult-societies",
+        type: 'book',
         title: "Research Occult Societies",
         description: `Uncover the hidden history of occult organizations.`,
         outcomes: [
@@ -720,6 +742,7 @@ export const actions = {
 
     documentStrangeSymbols: (city: City): Action => ({
         id: "document-strange-symbols",
+        type: 'artifact',
         title: "Document Strange Symbols",
         description: `Record and analyze the occult symbols you've found.`,
         outcomes: [
@@ -750,6 +773,7 @@ export const actions = {
 
     studyRitualTheory: (city: City): Action => ({
         id: "study-ritual-theory",
+        type: 'book',
         title: "Study Ritual Theory",
         description: `Master the theoretical foundations of occult practice.`,
         outcomes: [
@@ -777,6 +801,7 @@ export const actions = {
 
     attractWealthyPatron: (city: City): Action => ({
         id: "attract-wealthy-patron",
+        type: 'patron',
         title: "Attract Wealthy Patron",
         description: `Gain the financial backing of someone influential.`,
         outcomes: [
@@ -805,6 +830,7 @@ export const actions = {
 
     securePrivateMeetingSpace: (city: City): Action => ({
         id: "secure-private-meeting-space",
+        type: 'site',
         title: "Secure Private Meeting Space",
         description: `Establish a permanent, private location for your work.`,
         outcomes: [
@@ -821,6 +847,7 @@ export const actions = {
 
     mysteryThreshold: (city: City): Action => ({
         id: "mystery-threshold",
+        type: 'artifact',
         title: "???",
         description: `Something waits beyond the threshold of understanding...`,
         outcomes: [
@@ -855,6 +882,7 @@ function serializeAction(action: Action): any {
         id: action.id,
         title: action.title,
         description: action.description,
+        type: action.type,
         outcomes: action.outcomes.map(serializeOutcome)
     };
 }
@@ -898,6 +926,7 @@ function deserializeAction(data: any): Action {
         id: data.id,
         title: data.title,
         description: data.description,
+        type: data.type,
         outcomes: deserializedOutcomes as OutcomeWithData[]
     };
 }
@@ -917,29 +946,29 @@ export function performAction(action: Action, follower: Follower, gameState: Gam
     throw new Error("No outcome selected, this should not happen.");
 }
 
-export function performCityActions(assignments: { [actionId: string]: string }, actions: Action[], gameState: GameState) : { [actionId: string]: Outcome } {
-    const results: { [actionId: string]: Outcome } = {};
-    for (const [actionId, followerId] of Object.entries(assignments)) {
-        const action = actions.find(a => a.id === actionId);
-        if (!action) {
-            throw new Error(`Action with id ${actionId} not found in action map.`);
+// assignments: { slotKey: itemId } where slotKey = "${followerId}:${slotIndex}"
+export function performCityActions(assignments: Record<string, string>, items: Action[], gameState: GameState): Record<string, Outcome> {
+    const results: Record<string, Outcome> = {};
+    for (const [slotKey, itemId] of Object.entries(assignments)) {
+        const item = items.find(a => a.id === itemId);
+        if (!item) {
+            throw new Error(`Item with id ${itemId} not found in action map.`);
         }
+        const followerId = slotKey.split(':')[0];
         const follower = gameState.followers.find(f => f.id === followerId);
         if (!follower) {
             throw new Error(`Follower with id ${followerId} not found in game state.`);
         }
-        const outcome = performAction(action, follower, gameState);
-        results[actionId] = outcome;
+        const outcome = performAction(item, follower, gameState);
+        results[slotKey] = outcome;
     }
     return results;
 }
 
-export function enactCityActions(assignments: { [actionId: string]: string }, results: { [actionId: string]: Outcome }, gameState: GameState): void {
-    for (const [actionId, outcome] of Object.entries(results)) {
-        const followerId = assignments[actionId];
-        if (!followerId) {
-            throw new Error(`No follower assigned to action ${actionId}.`);
-        }
+// assignments: { slotKey: itemId }, results: { slotKey: Outcome }
+export function enactCityActions(assignments: Record<string, string>, results: Record<string, Outcome>, gameState: GameState): void {
+    for (const [slotKey, outcome] of Object.entries(results)) {
+        const followerId = slotKey.split(':')[0];
         const follower = gameState.followers.find(f => f.id === followerId);
         if (!follower) {
             throw new Error(`Follower with id ${followerId} not found in game state.`);

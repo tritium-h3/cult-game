@@ -153,7 +153,8 @@ export function generateFollowers(circleId: string, cityId: string, count: numbe
       background: `[FOLLOWER_${i + 1}_BACKGROUND]`,
       location: cityId,
       traits: [circleId],
-      skills: followerSkills
+      skills: followerSkills,
+      slots: 1
     });
   }
 

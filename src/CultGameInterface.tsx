@@ -10,9 +10,10 @@ export default function CultGameInterface() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<City | undefined>(undefined);
   const [view, setView] = useState<'map' | 'location' | 'report'>('map');
-  const [assignments, setAssignments] = useState<Record<string, string>>({}); // { actionId: followerId }
-  const [draggedFollower, setDraggedFollower] = useState<{followerIndex: string, fromActionIndex: string | null} | null>(null);
-  const [weekResults, setWeekResults] = useState<{ results: Record<string, Outcome>; updatedState: GameState; assignments: Record<string, string>; actions: Action[] } | null>(null);
+  // assignments: { "${followerId}:${slotIndex}": itemId }
+  const [assignments, setAssignments] = useState<Record<string, string>>({});
+  const [draggedItem, setDraggedItem] = useState<{ itemId: string; fromSlotKey: string | null } | null>(null);
+  const [weekResults, setWeekResults] = useState<{ results: Record<string, Outcome>; updatedState: GameState; assignments: Record<string, string>; items: Action[] } | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -61,73 +62,42 @@ export default function CultGameInterface() {
     }
   }, [navigate]);
 
-  const handleDragStart = (e : DragEvent<HTMLDivElement>, followerIndex: string, fromActionIndex : string | null = null) => {
-    setDraggedFollower({ followerIndex, fromActionIndex });
+  const handleItemDragStart = (e: DragEvent<HTMLDivElement>, itemId: string, fromSlotKey: string | null = null) => {
+    setDraggedItem({ itemId, fromSlotKey });
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'move';
     }
   };
 
-  const handleDragOver = (e : DragEvent<HTMLDivElement>) => {
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     if (e.dataTransfer) {
       e.dataTransfer.dropEffect = 'move';
     }
   };
 
-  const handleDrop = (e : DragEvent<HTMLDivElement>, actionIndex : string) => {
+  const handleDropToSlot = (e: DragEvent<HTMLDivElement>, targetSlotKey: string) => {
     e.preventDefault();
-    if (draggedFollower !== null) {
-      const { followerIndex, fromActionIndex } = draggedFollower;
-      
-      // Check if this follower is already assigned somewhere (other than where they're being dragged from)
-      const currentAssignment : [string, string] | undefined = Object.entries(assignments).find(
-        ([actIdx, followerIdx]) => followerIdx === followerIndex && actIdx !== fromActionIndex
-      );
-      
-      // Remove from current assignment if exists
-      const newAssignments = { ...assignments };
-      if (currentAssignment) {
-        delete newAssignments[parseInt(currentAssignment[0])];
-      }
-      
-      // Remove from the action they're being dragged from
-      if (fromActionIndex !== null) {
-        delete newAssignments[fromActionIndex];
-      }
-      
-      // Check if someone else is assigned to this action
-      if (newAssignments[actionIndex] !== undefined) {
-        // Swap them
-        const otherFollower = newAssignments[actionIndex];
-        if (fromActionIndex !== null) {
-          newAssignments[fromActionIndex] = otherFollower;
-        }
-      }
-      
-      // Assign to new action
-      newAssignments[actionIndex] = followerIndex;
-      setAssignments(newAssignments);
-    }
-    setDraggedFollower(null);
-  };
-
-  const handleDropToUnassign = (e : DragEvent) => {
-    e.preventDefault();
-    if (draggedFollower !== null) {
-      const { fromActionIndex } = draggedFollower;
-      if (fromActionIndex !== null) {
-        const newAssignments = { ...assignments };
-        delete newAssignments[fromActionIndex];
-        setAssignments(newAssignments);
-      }
-    }
-    setDraggedFollower(null);
-  };
-
-  const handleRemoveAssignment = (actionIndex : number) => {
+    if (!draggedItem) return;
+    const { itemId, fromSlotKey } = draggedItem;
     const newAssignments = { ...assignments };
-    delete newAssignments[actionIndex];
+    // Clear source slot if re-dragging from a slot
+    if (fromSlotKey !== null) {
+      delete newAssignments[fromSlotKey];
+    }
+    // Displace any existing item in target (sends it back to unassigned pool)
+    delete newAssignments[targetSlotKey];
+    // Assign item to target slot
+    newAssignments[targetSlotKey] = itemId;
+    console.log('Drop to slot:', targetSlotKey, '← item:', itemId);
+    setAssignments(newAssignments);
+    setDraggedItem(null);
+  };
+
+  const handleRemoveFromSlot = (slotKey: string) => {
+    const newAssignments = { ...assignments };
+    delete newAssignments[slotKey];
+    console.log('Removed item from slot:', slotKey);
     setAssignments(newAssignments);
   };
 
@@ -220,13 +190,21 @@ export default function CultGameInterface() {
   if (view === 'location') {
     console.log('=== LOCATION VIEW DEBUG ===');
     console.log('selectedLocation:', selectedLocation);
-    console.log('selectedLocation?.id:', selectedLocation?.id);
-    console.log('gameState.map:', gameState.map);
     console.log('gameState.map keys:', gameState.map ? Object.keys(gameState.map) : 'no map');
-    const actions = gameState.map?.[selectedLocation?.id || ''] || [];
-    console.log('Looking for actions with key:', selectedLocation?.id || '');
-    console.log('actions found:', actions);
+    const items = gameState.map?.[selectedLocation?.id || ''] || [];
+    console.log('items found:', items.length);
     console.log('=== END DEBUG ===');
+
+    // Group items by knowledge type
+    const itemsByType: Record<string, Action[]> = { site: [], book: [], patron: [], artifact: [] };
+    items.forEach(item => itemsByType[item.type ?? 'site'].push(item));
+
+    const typeConfig: Record<string, { label: string; headerClass: string; badgeClass: string; borderClass: string }> = {
+      site:     { label: 'Sites',     headerClass: 'text-amber-400',  badgeClass: 'bg-amber-800/40 text-amber-300',   borderClass: 'border-amber-500/40' },
+      book:     { label: 'Books',     headerClass: 'text-violet-400', badgeClass: 'bg-violet-800/40 text-violet-300', borderClass: 'border-violet-500/40' },
+      patron:   { label: 'Patrons',   headerClass: 'text-teal-400',   badgeClass: 'bg-teal-800/40 text-teal-300',     borderClass: 'border-teal-500/40' },
+      artifact: { label: 'Artifacts', headerClass: 'text-rose-400',   badgeClass: 'bg-rose-800/40 text-rose-300',     borderClass: 'border-rose-500/40' },
+    };
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-6">
@@ -234,7 +212,7 @@ export default function CultGameInterface() {
         <div className="max-w-7xl mx-auto mb-6">
           <div className="flex justify-between items-center bg-black/30 border border-amber-600/20 rounded-lg p-4">
             <div>
-              <button 
+              <button
                 onClick={() => setView('map')}
                 className="text-sm text-amber-400 hover:text-amber-300 mb-1"
               >
@@ -242,54 +220,59 @@ export default function CultGameInterface() {
               </button>
               <h1 className="text-2xl font-serif text-amber-300">{selectedLocation?.name}</h1>
             </div>
-            <div className="flex items-center gap-4 text-sm">
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4" />
-                <span>Week {gameState.week}</span>
-              </div>
+            <div className="flex items-center gap-2 text-sm">
+              <Calendar className="w-4 h-4" />
+              <span>Week {gameState.week}</span>
             </div>
           </div>
         </div>
 
-        {/* Location Board */}
+        {/* Board */}
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-4 gap-4">
-            {/* Adherents Panel */}
-            <div className="col-span-1">
-              <div className="bg-black/40 border border-amber-600/20 rounded-lg p-4">
-                <h2 className="text-sm font-serif text-amber-300 mb-3">Adherents</h2>
-                <div 
-                  className="space-y-2 overflow-y-auto pr-2"
-                  style={{ maxHeight: 'calc(100vh - 280px)' }}
-                  onDragOver={handleDragOver}
-                  onDrop={handleDropToUnassign}
-                >
-                  {gameState.followers.map((follower, idx) => {
-                    const isAssigned = Object.values(assignments).includes(follower.id);
-                    
+          <div className="grid grid-cols-5 gap-4">
+
+            {/* Left: Known to You */}
+            <div className="col-span-2">
+              <div
+                className="bg-black/40 border border-amber-600/20 rounded-lg p-4 overflow-y-auto"
+                style={{ maxHeight: 'calc(100vh - 220px)' }}
+              >
+                <h2 className="text-sm font-serif text-amber-300 mb-4">Known to You</h2>
+                <div className="space-y-5">
+                  {(['site', 'book', 'patron', 'artifact'] as const).map(type => {
+                    const typeItems = itemsByType[type];
+                    if (typeItems.length === 0) return null;
+                    const cfg = typeConfig[type];
                     return (
-                      <div 
-                        key={idx}
-                        draggable={!isAssigned}
-                        onDragStart={(e) => handleDragStart(e, follower.id)}
-                        className={`bg-purple-900/20 border border-amber-500/20 rounded p-2 transition-all text-xs ${
-                          !isAssigned 
-                            ? 'cursor-move hover:border-amber-500/40 hover:shadow-lg' 
-                            : 'opacity-40 cursor-not-allowed'
-                        }`}
-                      >
-                        <p className="font-serif text-amber-200 text-sm">{follower.name}</p>
-                        <p className="text-xs text-amber-200/60 mt-0.5 line-clamp-1">{follower.background}</p>
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {Array.isArray(follower.skills) ? follower.skills.map((skill, i) => (
-                            <span key={i} className="text-xs px-1.5 py-0.5 bg-amber-800/30 rounded text-amber-300">
-                              {skill}
-                            </span>
-                          )) : null}
+                      <div key={type}>
+                        <p className={`text-xs font-semibold uppercase tracking-wider mb-2 ${cfg.headerClass}`}>
+                          {cfg.label}
+                        </p>
+                        <div className="space-y-2">
+                          {typeItems.map(item => {
+                            const isAssigned = Object.values(assignments).includes(item.id);
+                            return (
+                              <div
+                                key={item.id}
+                                draggable={!isAssigned}
+                                onDragStart={(e) => handleItemDragStart(e, item.id)}
+                                className={`border rounded p-2 transition-all text-xs ${cfg.borderClass} ${
+                                  isAssigned
+                                    ? 'bg-black/10 opacity-40 cursor-not-allowed'
+                                    : 'bg-purple-900/20 cursor-move hover:bg-purple-900/40'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-serif text-amber-200 text-sm leading-snug">{item.title}</p>
+                                    <p className="text-xs text-amber-200/50 mt-0.5 line-clamp-2">{item.description}</p>
+                                  </div>
+                                  <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${cfg.badgeClass}`}>{type}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                        {isAssigned && (
-                          <p className="text-xs text-amber-400 mt-1.5 italic">Assigned</p>
-                        )}
                       </div>
                     );
                   })}
@@ -297,79 +280,86 @@ export default function CultGameInterface() {
               </div>
             </div>
 
-            {/* Actions Panel */}
+            {/* Right: Adherents */}
             <div className="col-span-3">
               <div className="bg-black/40 border border-amber-600/20 rounded-lg p-4">
-                <h2 className="text-sm font-serif text-amber-300 mb-3">Available Actions</h2>
-                
-                <div className="grid grid-cols-2 gap-3 overflow-y-auto pr-2" style={{ maxHeight: 'calc(100vh - 280px)' }}>
-                  {actions.map((action, actionIdx) => {
-                    const assignedFollowerId = assignments[action.id];
-                    const assignedFollower = assignedFollowerId !== undefined 
-                      ? gameState.followers.find((follower) => follower.id === assignedFollowerId)
-                      : null;
-
+                <h2 className="text-sm font-serif text-amber-300 mb-4">Adherents</h2>
+                <div className="space-y-4 overflow-y-auto pr-2" style={{ maxHeight: 'calc(100vh - 340px)' }}>
+                  {gameState.followers.map(follower => {
+                    const numSlots = follower.slots ?? 1;
                     return (
-                      <div key={actionIdx} className="border border-purple-500/30 rounded-lg p-3 bg-purple-900/10">
-                        <h3 className="font-serif text-amber-300 text-sm mb-1">{action.title}</h3>
-                        <p className="text-xs text-amber-200/70 mb-2 line-clamp-2">{action.description}</p>
-                        
-                        <div 
-                          onDragOver={handleDragOver}
-                          onDrop={(e) => handleDrop(e, action.id)}
-                          className={`border-2 border-dashed rounded p-2 min-h-16 transition-colors ${
-                            assignedFollower 
-                              ? 'border-amber-500/60 bg-amber-900/10' 
-                              : 'border-amber-500/30'
-                          }`}
-                        >
-                          {assignedFollower ? (
-                            <div 
-                              draggable
-                              onDragStart={(e) => handleDragStart(e, assignedFollower.id, action.id)}
-                              className="cursor-move hover:bg-amber-900/20 transition-colors rounded p-1.5 -m-1.5"
-                            >
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1 min-w-0">
-                                  <p className="font-serif text-amber-200 text-sm">{assignedFollower.name}</p>
-                                  <p className="text-xs text-amber-200/60 mt-0.5 line-clamp-1">{assignedFollower.background}</p>
-                                  <div className="flex flex-wrap gap-1 mt-1.5">
-                                    {Array.isArray(assignedFollower.skills) 
-                                      ? assignedFollower.skills.map((skill, i) => (
-                                        <span key={i} className="text-xs px-1.5 py-0.5 bg-amber-800/30 rounded text-amber-300">
-                                          {skill}
-                                        </span>
-                                      )) 
-                                      : null}
+                      <div key={follower.id} className="border border-purple-500/30 rounded-lg p-3 bg-purple-900/10">
+                        {/* Follower info */}
+                        <div className="mb-3">
+                          <p className="font-serif text-amber-300 text-sm">{follower.name}</p>
+                          <p className="text-xs text-amber-200/60 mt-0.5 line-clamp-1">{follower.background}</p>
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {Array.isArray(follower.skills) && follower.skills.map(skill => (
+                              <span key={skill} className="text-xs px-1.5 py-0.5 bg-amber-800/30 rounded text-amber-300">{skill}</span>
+                            ))}
+                          </div>
+                        </div>
+                        {/* Slots */}
+                        <div className={`grid gap-2 ${numSlots > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                          {Array.from({ length: numSlots }).map((_, slotIndex) => {
+                            const slotKey = `${follower.id}:${slotIndex}`;
+                            const assignedItemId = assignments[slotKey];
+                            const assignedItem = assignedItemId ? items.find(i => i.id === assignedItemId) : null;
+                            const slotCfg = assignedItem?.type ? typeConfig[assignedItem.type] : null;
+                            return (
+                              <div
+                                key={slotKey}
+                                onDragOver={handleDragOver}
+                                onDrop={(e) => handleDropToSlot(e, slotKey)}
+                                className={`border-2 border-dashed rounded p-2 min-h-14 transition-colors ${
+                                  assignedItem
+                                    ? 'border-amber-500/60 bg-amber-900/10'
+                                    : 'border-amber-500/20'
+                                }`}
+                              >
+                                {assignedItem ? (
+                                  <div
+                                    draggable
+                                    onDragStart={(e) => handleItemDragStart(e, assignedItem.id, slotKey)}
+                                    className="cursor-move hover:bg-amber-900/20 transition-colors rounded p-0.5 -m-0.5"
+                                  >
+                                    <div className="flex items-start justify-between gap-1">
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-serif text-amber-200 leading-snug">{assignedItem.title}</p>
+                                        {slotCfg && (
+                                          <span className={`text-xs px-1 py-0.5 rounded mt-0.5 inline-block ${slotCfg.badgeClass}`}>
+                                            {assignedItem.type}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <button
+                                        onClick={() => handleRemoveFromSlot(slotKey)}
+                                        className="text-amber-400/70 hover:text-amber-300 flex-shrink-0 text-lg leading-none ml-1"
+                                      >×</button>
+                                    </div>
                                   </div>
-                                </div>
-                                <button 
-                                  onClick={() => handleRemoveAssignment(actionIdx)}
-                                  className="text-xs text-amber-400 hover:text-amber-300 underline ml-2 flex-shrink-0"
-                                >
-                                  Remove
-                                </button>
+                                ) : (
+                                  <div className="flex items-center justify-center h-full">
+                                    <p className="text-xs text-amber-300/30">Drop knowledge here</p>
+                                  </div>
+                                )}
                               </div>
-                            </div>
-                          ) : (
-                            <div className="text-center flex items-center justify-center h-full">
-                              <p className="text-xs text-amber-300/50">Drag adherent here</p>
-                            </div>
-                          )}
+                            );
+                          })}
                         </div>
                       </div>
                     );
                   })}
                 </div>
 
-                {/* Process Week Button */}
+                {/* Complete Week Button */}
                 <div className="mt-4 text-center">
-                  <button 
+                  <button
                     className="px-4 py-2 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors text-sm"
                     onClick={() => {
-                      const { results, updatedState } = completeWeek(assignments, actions, gameState);
-                      // Store results and show report screen
-                      setWeekResults({ results, updatedState, assignments, actions });
+                      console.log('Completing week with assignments:', assignments);
+                      const { results, updatedState } = completeWeek(assignments, items, gameState);
+                      setWeekResults({ results, updatedState, assignments, items });
                       setView('report');
                     }}
                   >
@@ -378,6 +368,7 @@ export default function CultGameInterface() {
                 </div>
               </div>
             </div>
+
           </div>
         </div>
       </div>
@@ -386,7 +377,7 @@ export default function CultGameInterface() {
 
   // Report view
   if (view === 'report' && weekResults) {
-    const { results, updatedState, assignments: weekAssignments, actions } = weekResults;
+    const { results, updatedState, assignments: weekAssignments, items } = weekResults;
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-6">
@@ -403,17 +394,18 @@ export default function CultGameInterface() {
             <h2 className="text-xl font-serif text-amber-300 mb-6">Events of the Week</h2>
             
             <div className="space-y-6">
-              {Object.entries(results).map(([actionId, outcome]) => {
-                const action = actions.find(a => a.id === actionId);
-                const followerId = weekAssignments[actionId];
+              {Object.entries(results).map(([slotKey, outcome]) => {
+                const itemId = weekAssignments[slotKey];
+                const followerId = slotKey.split(':')[0];
+                const item = items.find(a => a.id === itemId);
                 const follower = gameState?.followers.find(f => f.id === followerId);
 
-                if (!action || !follower) return null;
+                if (!item || !follower) return null;
 
                 return (
-                  <div key={actionId} className="border border-purple-500/30 rounded-lg p-6 bg-purple-900/10">
+                  <div key={slotKey} className="border border-purple-500/30 rounded-lg p-6 bg-purple-900/10">
                     <div className="mb-3">
-                      <h3 className="font-serif text-amber-300 text-lg">{action.title}</h3>
+                      <h3 className="font-serif text-amber-300 text-lg">{item.title}</h3>
                       <p className="text-sm text-amber-200/70 mt-1">{selectedLocation?.name}</p>
                     </div>
                     
