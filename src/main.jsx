@@ -7,6 +7,7 @@ import CultGameInterface from './CultGameInterface.js'
 import LoadSampleMode from './LoadSampleMode.js'
 import ClearStorage from './ClearStorage.js'
 import MagicPrototype from './MagicPrototype.js'
+import UIDemo from './UIDemo.js'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -17,6 +18,7 @@ createRoot(document.getElementById('root')).render(
         <Route path="/sample" element={<LoadSampleMode />} />
         <Route path="/clear" element={<ClearStorage />} />
         <Route path="/magic" element={<MagicPrototype />} />
+        <Route path="/demo" element={<UIDemo />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,
