@@ -1,33 +1,152 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Sparkles, User, Users, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import './Game.css';
+import { Table, Card, Sheet, Slot, type CardData } from './ui';
 import { CARD_SPREADS, generateInitialGameState, getNarrative, getGameState, generateCultName } from './game/reading';
-import { Card, GameState, Spread } from './game/types';
+import type { Card as TarotCardType, GameState } from './game/types';
 import { getCityById, CITIES } from './game/world';
 
+// ── Grid layout constants (1 unit = 80px, default cardW=2 cardH=3 → 160×240px) ──
+const GRID = 80;
+// 5 cards arranged in a 2-column layout with 1-cell margins from the screen edge.
+// Col1 at gx=1, col2 at gx=3 (1-cell left margin). 3 rows with 1-cell vertical gaps.
+//   row1 gy=1: card[0] col1, card[1] col2
+//   row2 gy=5: card[2] col1, card[3] col2   (1-cell gap: 1+3+1=5)
+//   row3 gy=9: card[4] centred at gx=2       (1-cell gap: 5+3+1=9)
+const SPREAD_CARD_GXS = [1, 3, 1, 3, 2];
+const SPREAD_CARD_GYS = [1, 1, 5, 5, 9];
+// Sheet: 1-cell right of the card area (col2 ends at gx=5, +1 gap = gx=6),
+// 1-cell top margin, 14 cols wide (accommodates slots dx=0..12+2=14), 11 rows tall.
+const SHEET_GX = 6;
+const SHEET_GY = 1;
+const SHEET_COLS = 14;
+const SHEET_ROWS = 11;
+// Slot dx offsets within the sheet (5 positions × 2-wide with 1-cell gap)
+const SLOT_DXS = [0, 3, 6, 9, 12];
+// Slots start at dy=5, leaving 400px of text area above them
+const SLOT_DY = 5;
+
+function getCardsForSpread(spreadIndex: number): Record<string, CardData> {
+  const result: Record<string, CardData> = {};
+  CARD_SPREADS[spreadIndex].cards.forEach((card, i) => {
+    result[`tarot-${spreadIndex}-${card.id}`] = {
+      gx: SPREAD_CARD_GXS[i],
+      gy: SPREAD_CARD_GYS[i],
+    };
+  });
+  return result;
+}
+
+// ── Tarot card face content ───────────────────────────────────────────────
+function DivinationCard({ cardId }: { cardId: string }) {
+  const parts = cardId.split('-');
+  const spreadIdx = parseInt(parts[1]);
+  const id = parts.slice(2).join('-');
+  const spread = CARD_SPREADS[spreadIdx];
+  const card = spread?.cards.find(c => c.id === id);
+  if (!card || !spread) return null;
+  return (
+    <div
+      className="h-full w-full flex flex-col rounded overflow-hidden"
+      style={{
+        background: 'linear-gradient(160deg, #231832 0%, #0c1220 100%)',
+        border: '1px solid rgba(217,119,6,0.4)',
+      }}
+    >
+      <div
+        className="px-2 py-1 text-amber-500/60 text-xs font-serif text-center shrink-0"
+        style={{
+          borderBottom: '1px solid rgba(217,119,6,0.18)',
+          background: 'rgba(120,53,15,0.25)',
+        }}
+      >
+        {spread.title}
+      </div>
+      <div className="flex-1 flex flex-col px-3 py-2 gap-1 min-h-0">
+        <div className="text-amber-300 font-serif text-sm font-bold leading-tight shrink-0">
+          {card.name}
+        </div>
+        <div className="border-t border-amber-800/30 shrink-0" />
+        <div className="text-amber-100/65 text-xs leading-snug overflow-hidden">
+          {card.description}
+        </div>
+      </div>
+      <div
+        className="px-2 py-1 text-center text-amber-700/40 text-xs shrink-0"
+        style={{ borderTop: '1px solid rgba(217,119,6,0.1)' }}
+      >
+        drag to scroll →
+      </div>
+    </div>
+  );
+}
+
+// ── Ghost slot visual (future, unrevealed step) ───────────────────────────
+function GhostSlot({ dx, spreadIndex }: { dx: number; spreadIndex: number }) {
+  const spread = CARD_SPREADS[spreadIndex];
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: dx * GRID,
+        top: SLOT_DY * GRID,
+        width: 2 * GRID,
+        height: 3 * GRID, // matches default cardH: 3
+      }}
+    >
+      <div
+        className="absolute inset-2 rounded border-2 border-dashed flex flex-col items-center justify-center gap-1"
+        style={{
+          borderColor: 'rgba(120,53,15,0.14)',
+          background: 'rgba(0,0,0,0.08)',
+        }}
+      >
+        <div
+          className="font-serif text-xs text-center px-2 leading-snug"
+          style={{ color: 'rgba(120,53,15,0.22)' }}
+        >
+          {spread.title}
+        </div>
+        <div
+          className="text-xs text-center px-2 leading-snug"
+          style={{ color: 'rgba(120,53,15,0.15)' }}
+        >
+          {spread.meaning}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CultCardSelection() {
-  const [currentSpread, setCurrentSpread] = useState<number>(0);
-  const [selectedCards, setSelectedCards] = useState<string[]>([]);
-  const [flippedCard, setFlippedCard] = useState<string | null>(null);
+  // ── Selection state ────────────────────────────────────────────────
+  const [currentSpreadIndex, setCurrentSpreadIndex] = useState(0);
+  // spreadIdx → tarot card id (e.g. 'fool')
+  const [lockedCardIds, setLockedCardIds] = useState<Record<number, string>>({});
+  // Controlled card map for the Table
+  const [cards, setCards] = useState<Record<string, CardData>>(getCardsForSpread(0));
+
+  // ── Phase / narrative state ────────────────────────────────────────
+  const [readingState, setNarrativeState] = useState<'selection' | 'naming' | 'narrating' | 'ready'>('selection');
   const [narrative, setNarrative] = useState<string>('');
   const [gameState, setGameState] = useState<GameState>({} as GameState);
   const navigate = useNavigate();
-  const [readingState, setNarrativeState] = useState<'selection' | 'naming' | 'narrating' | 'ready'>('selection');
+
+  // ── Naming state ──────────────────────────────────────────────────
   const [cultName, setCultName] = useState('');
   const [leaderName, setLeaderName] = useState('');
   const [selectedCity, setSelectedCity] = useState<string>('');
   const [hasUserSetName, setHasUserSetName] = useState(false);
   const [hasUserSetCultName, setHasUserSetCultName] = useState(false);
 
-  // When entering naming state, initialize city and generate suggested name
+  // Derived ordered card selection (mirrors original selectedCards shape)
+  const selectedCards = CARD_SPREADS.map((_, i) => lockedCardIds[i] ?? '');
+
+  // When entering naming state, pick a starting city based on archetype
   useEffect(() => {
     if (readingState === 'naming' && !selectedCity) {
-      // Pick random city based on archetype
-      const archetype = selectedCards[0]; // The Seeker card
-      const archetypeId = CARD_SPREADS[0].cards.find(c => c.id === archetype)?.id || 'hermit';
-      
-      // Import the ARCHETYPE_CITIES logic from reading.ts
+      const archetypeId = selectedCards[0] || 'hermit';
       const archetypeCities: { [key: string]: string[] } = {
         'fool': ['san-francisco', 'shanghai', 'london', 'new-orleans', 'mexico-city', 'istanbul', 'sedona'],
         'hanged': ['varanasi', 'kyoto', 'jerusalem', 'sedona', 'athens', 'santa-fe', 'cairo'],
@@ -35,63 +154,45 @@ export default function CultCardSelection() {
         'tower': ['new-orleans', 'salem', 'edinburgh', 'reykjavik', 'mexico-city', 'cairo', 'jerusalem'],
         'magician': ['san-francisco', 'london', 'shanghai', 'marrakech', 'prague', 'istanbul', 'athens', 'new-orleans']
       };
-      
       const possibleCities = archetypeCities[archetypeId] || CITIES.map(city => city.id);
       const randomCity = possibleCities[Math.floor(Math.random() * possibleCities.length)];
-      
       console.log('Initial city selection:', randomCity, 'for archetype:', archetypeId);
       setSelectedCity(randomCity);
     }
-  }, [readingState, selectedCards, selectedCity]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readingState, selectedCity]);
 
-  // When city changes, generate a new suggested name (if user hasn't customized it)
+  // When city changes, suggest a name based on locale
   useEffect(() => {
     if (selectedCity && !hasUserSetName) {
       const city = getCityById(selectedCity);
       if (city) {
-        const faker = city.faker;
-        const suggestedName = faker.person.fullName();
+        const suggestedName = city.faker.person.fullName();
         console.log('Suggesting name:', suggestedName, 'for city:', selectedCity);
         setLeaderName(suggestedName);
       }
     }
   }, [selectedCity, hasUserSetName]);
 
-  // Initialize cult name when entering naming state
+  // Suggest cult name when naming screen opens
   useEffect(() => {
-    if (readingState === 'naming' && !hasUserSetCultName && selectedCards.length >= 4) {
-      const mysteryId = selectedCards[2]; // The Mystery card (index 2)
-      const horizonId = selectedCards[3]; // The Horizon card (index 3)
-      const suggestedCultName = generateCultName(mysteryId, horizonId);
-      console.log('Suggesting cult name:', suggestedCultName);
-      setCultName(suggestedCultName);
-    }
-  }, [readingState, selectedCards, hasUserSetCultName]);
-
-  const handleCardClick = (cardId: string) => {
-    if (flippedCard === cardId) {
-      // Confirm selection
-      const newSelections = [...selectedCards, cardId];
-      setSelectedCards(newSelections);
-      setFlippedCard(null);
-      
-      if (currentSpread < CARD_SPREADS.length - 1) {
-        setCurrentSpread(currentSpread + 1);
-      } else {
-        // All cards selected, move to naming state
-        setNarrativeState('naming');
+    if (readingState === 'naming' && !hasUserSetCultName) {
+      const mysteryId = selectedCards[2];
+      const horizonId = selectedCards[3];
+      if (mysteryId && horizonId) {
+        const suggestedCultName = generateCultName(mysteryId, horizonId);
+        console.log('Suggesting cult name:', suggestedCultName);
+        setCultName(suggestedCultName);
       }
-    } else {
-      // Flip card
-      setFlippedCard(cardId);
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readingState, hasUserSetCultName]);
 
   function reset() {
       setNarrativeState('selection');
-      setCurrentSpread(0);
-      setSelectedCards([]);
-      setFlippedCard(null);
+      setCurrentSpreadIndex(0);
+      setLockedCardIds({});
+      setCards(getCardsForSpread(0));
       setNarrative('');
       setGameState({} as GameState);
       setCultName('');
@@ -107,7 +208,7 @@ export default function CultCardSelection() {
 
   const generateNarrative = async () => {
     setNarrativeState('narrating');
-    const selectedCardsData: Card[] = selectedCards.map((id, idx) => {
+    const selectedCardsData: TarotCardType[] = selectedCards.map((id, idx) => {
       const spread = CARD_SPREADS[idx];
       const card = spread.cards.find(c => c.id === id);
       if (!card) throw new Error(`Card with id ${id} not found in spread ${spread.title}`);
@@ -153,7 +254,52 @@ export default function CultCardSelection() {
     generateNarrative();
   };
 
-  // Name input screen
+  // ── Slot drop handler ────────────────────────────────────────────────────
+  const handleSlotDrop = useCallback((slotId: string, cardId: string) => {
+    const slotIdx = parseInt(slotId.replace('slot-', ''));
+    if (slotIdx !== currentSpreadIndex) {
+      console.log(`[CultCardSelection] Ignoring drop on slot-${slotIdx} (current: ${currentSpreadIndex})`);
+      return;
+    }
+    const tarotCardName = cardId.split('-').slice(2).join('-');
+    console.log(`[CultCardSelection] Step ${slotIdx}: selected card "${tarotCardName}"`);
+
+    setLockedCardIds(prev => ({ ...prev, [slotIdx]: tarotCardName }));
+
+    const isLast = slotIdx === CARD_SPREADS.length - 1;
+    // Compute the exact slot grid position so we can reliably set it regardless of batching order
+    const slotGx = SHEET_GX + SLOT_DXS[slotIdx];
+    const slotGy = SHEET_GY + SLOT_DY;
+    if (!isLast) {
+      const nextIdx = slotIdx + 1;
+      setCurrentSpreadIndex(nextIdx);
+      setCards(prev => {
+        const next: Record<string, CardData> = {};
+        // Keep all cards already in slots (from completed spreads)
+        for (const [id, data] of Object.entries(prev)) {
+          if (data.slotId) next[id] = data;
+        }
+        // Explicitly place the just-dropped card at the computed slot position
+        next[cardId] = { gx: slotGx, gy: slotGy, slotId };
+        // Add next spread's cards
+        Object.assign(next, getCardsForSpread(nextIdx));
+        return next;
+      });
+    } else {
+      setCurrentSpreadIndex(CARD_SPREADS.length);
+      setCards(prev => {
+        const next: Record<string, CardData> = {};
+        for (const [id, data] of Object.entries(prev)) {
+          if (data.slotId) next[id] = data;
+        }
+        next[cardId] = { gx: slotGx, gy: slotGy, slotId };
+        return next;
+      });
+      setTimeout(() => setNarrativeState('naming'), 300);
+    }
+  }, [currentSpreadIndex]);
+
+  // ── Naming screen ─────────────────────────────────────────────────────────
   if (readingState === 'naming') {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-8">
@@ -265,14 +411,7 @@ export default function CultCardSelection() {
             <div className="flex gap-4 justify-center">
               <button
                 type="button"
-                onClick={() => {
-                  setNarrativeState('selection');
-                  setCultName('');
-                  setLeaderName('');
-                  setSelectedCity('');
-                  setHasUserSetName(false);
-                  setHasUserSetCultName(false);
-                }}
+                onClick={reset}
                 className="px-6 py-3 bg-slate-800/50 hover:bg-slate-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
               >
                 Return to Cards
@@ -290,8 +429,8 @@ export default function CultCardSelection() {
     );
   }
 
-  // Narration and ready screens
-  if ((readingState === 'narrating') || (readingState === 'ready')) {
+  // ── Narrating / Ready screen ──────────────────────────────────────────────
+  if (readingState === 'narrating' || readingState === 'ready') {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-8">
         <div className="max-w-4xl mx-auto">
@@ -308,7 +447,7 @@ export default function CultCardSelection() {
               </>
             )}
           </div>
-          
+``
           <div className="bg-black/40 border-2 border-amber-600/30 rounded-lg p-8 backdrop-blur mb-8">
             <div className="prose prose-invert prose-amber max-w-none">
               <p className="text-lg leading-relaxed whitespace-pre-wrap">{narrative}</p>
@@ -324,17 +463,13 @@ export default function CultCardSelection() {
 
           <div className="flex gap-4 justify-center">
             <button
-              onClick={() => { 
-                reset();
-              }}
+              onClick={reset}
               className="px-6 py-3 bg-purple-800/50 hover:bg-purple-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
             >
               Begin Another Reading
             </button>
             <button
-              onClick={() => {
-                navigate('/game');
-              }}
+              onClick={() => navigate('/game')}
               className="px-6 py-3 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
               disabled={readingState !== 'ready'}
             >
@@ -346,110 +481,197 @@ export default function CultCardSelection() {
     );
   }
 
-  const spread: Spread = CARD_SPREADS[currentSpread];
+  // ── Card selection screen (Table-based) ───────────────────────────────────
+  const activeSpread = CARD_SPREADS[currentSpreadIndex];
+  // Compact summary of choices already locked in
+  const lockedSummary = Object.entries(lockedCardIds)
+    .sort(([a], [b]) => parseInt(a) - parseInt(b))
+    .map(([idx, cardId]) => {
+      const spread = CARD_SPREADS[parseInt(idx)];
+      const card = spread.cards.find(c => c.id === cardId);
+      return card ? `${spread.title}: ${card.name}` : null;
+    })
+    .filter(Boolean);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-8">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <Sparkles className="w-12 h-12 mx-auto mb-4 text-amber-400 animate-pulse" />
-          <h1 className="text-4xl font-serif mb-2">The Reading</h1>
-          <p className="text-amber-200/70">Card {currentSpread + 1} of {CARD_SPREADS.length}</p>
-          <button
-            onClick={() => {
-              reset();
+    <div className="w-screen h-screen overflow-hidden">
+      {/* cardH: 2 makes each card 160×160px; 5 cards × 2 rows = 10 rows = 800px fills screen height */}
+      <Table cards={cards} onCardsChange={setCards} onSlotDrop={handleSlotDrop}>
+
+        {/* ── Divination scroll: single sheet occupying the right ~87% of the screen ── */}
+        <Sheet gx={SHEET_GX} gy={SHEET_GY} cols={SHEET_COLS} rows={SHEET_ROWS}>
+
+          {/* ── Decorative header ── */}
+          <div
+            style={{
+              position: 'absolute', top: 14, left: 0, right: 0,
+              textAlign: 'center', fontFamily: 'serif',
+              fontSize: '10px', letterSpacing: '0.18em', textTransform: 'uppercase',
+              color: 'rgba(217,119,6,0.35)', pointerEvents: 'none',
             }}
-            className="mt-4 px-4 py-2 text-sm bg-slate-800/50 hover:bg-slate-700/50 border border-amber-600/30 rounded text-amber-200 transition-colors"
           >
-            Reset Reading
-          </button>
-        </div>
-
-        {/* Progress */}
-        <div className="flex justify-center gap-2 mb-8">
-          {CARD_SPREADS.map((_, idx) => (
-            <div
-              key={idx}
-              className={`h-2 w-12 rounded ${
-                idx < currentSpread ? 'bg-amber-500' :
-                idx === currentSpread ? 'bg-amber-400 animate-pulse' :
-                'bg-slate-700'
-              }`}
-            />
-          ))}
-        </div>
-
-        {/* Selected Cards */}
-        {selectedCards.length > 0 && (
-          <div className="text-center mb-8 bg-black/30 border border-amber-600/20 rounded-lg p-4">
-            <h3 className="text-sm text-amber-300/70 mb-2">Cards Drawn:</h3>
-            <div className="flex flex-wrap justify-center gap-2">
-              {selectedCards.map((cardId, idx) => {
-                const spread = CARD_SPREADS[idx];
-                const card: Card | undefined = spread.cards.find(c => c.id === cardId);
-                return (
-                  <span key={idx} className="text-sm text-amber-200 italic">
-                    {card?.name || 'Unknown'}
-                  </span>
-                );
-              })}
-            </div>
+            The Divination
           </div>
-        )}
 
-        {/* Prompt */}
-        <div className="text-center mb-12">
-          <h2 className="text-2xl font-serif mb-2">{spread.title}</h2>
-          <p className="text-xl text-amber-300/90 italic">{spread.prompt}</p>
-        </div>
+          {/* Thin rule */}
+          <div style={{
+            position: 'absolute', top: 38, left: 24, right: 24,
+            height: 1, background: 'rgba(120,53,15,0.2)', pointerEvents: 'none',
+          }} />
 
-        {/* Cards */}
-        <div className="grid grid-cols-5 gap-4 mb-8">
-          {spread.cards.map((card) => {
-            const isFlipped = flippedCard === card.id;
-            
+          {/* ── Active spread: title ── */}
+          <div
+            style={{
+              position: 'absolute', top: 56, left: 0, right: 0,
+              textAlign: 'center', fontFamily: 'serif',
+              fontSize: '26px', fontWeight: 'bold',
+              color: 'rgba(251,191,36,0.9)', pointerEvents: 'none',
+            }}
+          >
+            {activeSpread?.title ?? 'Complete'}
+          </div>
+
+          {/* ── Active spread: meaning subtitle ── */}
+          <div
+            style={{
+              position: 'absolute', top: 100, left: 0, right: 0,
+              textAlign: 'center',
+              fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: 'rgba(217,119,6,0.5)', pointerEvents: 'none',
+            }}
+          >
+            {activeSpread?.meaning}
+          </div>
+
+          {/* ── Active spread: prompt ── */}
+          <div
+            style={{
+              position: 'absolute', top: 148, left: 32, right: 32,
+              textAlign: 'center', fontFamily: 'serif',
+              fontSize: '17px', fontStyle: 'italic', lineHeight: 1.55,
+              color: 'rgba(254,243,199,0.7)', pointerEvents: 'none',
+            }}
+          >
+            {activeSpread?.prompt}
+          </div>
+
+          {/* ── Reset button (top-right corner of sheet) ── */}
+          <button
+            onClick={reset}
+            style={{
+              position: 'absolute', top: 14, right: 12,
+              fontSize: '11px', padding: '3px 10px',
+              background: 'rgba(15,10,5,0.5)',
+              border: '1px solid rgba(120,53,15,0.3)',
+              borderRadius: 4, color: 'rgba(217,119,6,0.5)',
+              cursor: 'pointer',
+            }}
+          >
+            Reset
+          </button>
+
+          {/* ── Column labels (just above slots) ── */}
+          {SLOT_DXS.map((dx, idx) => (
+            <div
+              key={`col-label-${idx}`}
+              style={{
+                position: 'absolute',
+                left: dx * GRID + 4,
+                top: SLOT_DY * GRID - 30,
+                width: 2 * GRID - 8,
+                textAlign: 'center',
+                fontFamily: 'serif',
+                fontSize: '11px',
+                color:
+                  idx < currentSpreadIndex
+                    ? 'rgba(217,119,6,0.5)'
+                    : idx === currentSpreadIndex
+                    ? 'rgba(251,191,36,0.9)'
+                    : 'rgba(120,53,15,0.22)',
+                pointerEvents: 'none',
+              }}
+            >
+              {CARD_SPREADS[idx].title}
+            </div>
+          ))}
+
+          {/* ── Slots: past (locked) + active + future (ghost) ── */}
+          {SLOT_DXS.map((dx, idx) => {
+            if (idx > currentSpreadIndex) {
+              return <GhostSlot key={`ghost-${idx}`} dx={dx} spreadIndex={idx} />;
+            }
             return (
-              <button
-                key={card.id}
-                onClick={() => handleCardClick(card.id)}
-                className="relative aspect-[2/3] transition-all duration-500 transform hover:scale-105"
-                style={{
-                  transformStyle: 'preserve-3d',
-                  transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)'
-                }}
-              >
-                {/* Card Back */}
-                <div
-                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-purple-900 to-slate-900 flex items-center justify-center"
-                  style={{
-                    backfaceVisibility: 'hidden',
-                    border: '2px solid rgba(217, 119, 6, 0.5)',
-                    boxSizing: 'border-box'
-                  }}
-                >
-                  <Sparkles className="w-8 h-8 text-amber-500/50" />
-                </div>
-
-                {/* Card Front */}
-                <div
-                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-amber-900/20 to-purple-900/20 p-4 flex flex-col justify-between backdrop-blur"
-                  style={{
-                    backfaceVisibility: 'hidden',
-                    transform: 'rotateY(180deg)',
-                    border: '2px solid rgb(245, 158, 11)',
-                    boxSizing: 'border-box'
-                  }}
-                >
-                  <h3 className="text-lg font-serif text-amber-300">{card.name}</h3>
-                  <p className="text-xs text-amber-100/70 mt-2 leading-relaxed">{card.description}</p>
-                  <p className="text-xs text-amber-400 mt-2 italic">Click again to select</p>
-                </div>
-              </button>
+              <Slot
+                key={`slot-${idx}`}
+                id={`slot-${idx}`}
+                dx={dx}
+                dy={SLOT_DY}
+                locked={idx < currentSpreadIndex}
+                emptyLabel={CARD_SPREADS[idx].meaning}
+                className={idx === currentSpreadIndex ? 'ui-slot-active' : ''}
+              />
             );
           })}
-        </div>
-      </div>
+
+          {/* ── Meaning labels (just below slots) ── */}
+          {SLOT_DXS.map((dx, idx) => (
+            <div
+              key={`meaning-${idx}`}
+              style={{
+                position: 'absolute',
+                left: dx * GRID + 4,
+                top: (SLOT_DY + 3) * GRID + 10,
+                width: 2 * GRID - 8,
+                textAlign: 'center',
+                fontSize: '10px',
+                fontStyle: 'italic',
+                lineHeight: 1.4,
+                color:
+                  idx < currentSpreadIndex
+                    ? 'rgba(217,119,6,0.45)'
+                    : idx === currentSpreadIndex
+                    ? 'rgba(217,119,6,0.6)'
+                    : 'rgba(120,53,15,0.2)',
+                pointerEvents: 'none',
+              }}
+            >
+              {CARD_SPREADS[idx].meaning}
+            </div>
+          ))}
+
+          {/* ── Locked selections summary (bottom of sheet) ── */}
+          {lockedSummary.length > 0 && (
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 18,
+                left: 20,
+                right: 20,
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '8px 16px',
+                justifyContent: 'center',
+                pointerEvents: 'none',
+              }}
+            >
+              {lockedSummary.map((s, i) => (
+                <span key={i} style={{ fontSize: '11px', color: 'rgba(217,119,6,0.55)', fontStyle: 'italic' }}>
+                  {s}
+                </span>
+              ))}
+            </div>
+          )}
+
+        </Sheet>
+
+        {/* ── Cards: one column on the left, one spread visible at a time ── */}
+        {Object.keys(cards).map(cardId => (
+          <Card key={cardId} id={cardId} locked={!!cards[cardId]?.slotId}>
+            <DivinationCard cardId={cardId} />
+          </Card>
+        ))}
+
+      </Table>
     </div>
   );
 }

@@ -77,6 +77,22 @@
     background-color: rgb(120 53 15 / .2);
   }
 
+  /* Active (current step) slot — visually highlighted, overrides empty style */
+  .ui-slot-active {
+    border-style: solid !important;
+    border-color: rgb(251 191 36 / .7) !important;
+    background-color: rgb(120 53 15 / .3) !important;
+    animation: slot-active-pulse 2.2s ease-in-out infinite;
+  }
+  .ui-slot-active .ui-slot-label {
+    color: rgb(217 119 6 / .75) !important;
+  }
+
+  @keyframes slot-active-pulse {
+    0%, 100% { background-color: rgb(120 53 15 / .2); }
+    50%       { background-color: rgb(120 53 15 / .42); }
+  }
+
   .ui-slot-label       { color: rgb(120 53 15 / .6); }
   .ui-slot-locked-icon { color: rgb(120 53 15 / .5); }
 }
