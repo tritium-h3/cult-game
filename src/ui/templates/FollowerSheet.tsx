@@ -46,22 +46,22 @@ export function FollowerSheet({ name, background, skills = [], slots }: Follower
 
   return (
     // position: relative so absolutely-positioned Slots are contained here.
-    <div className="relative h-full w-full text-amber-100">
+    <div className="relative h-full w-full">
       {/* Info section — height matches the space above the first slot row */}
       <div
         style={{ height: infoHeightPx, overflow: 'hidden' }}
-        className="flex flex-col justify-center px-3 gap-1 border-b border-amber-600/20"
+        className="flex flex-col justify-center px-3 gap-1 border-b ui-follower-divider"
       >
-        <div className="font-serif text-base font-bold text-amber-300 leading-tight">{name}</div>
+        <div className="ui-follower-name font-serif text-base font-bold leading-tight">{name}</div>
         {background && (
-          <div className="text-xs text-amber-200/60 leading-snug">{background}</div>
+          <div className="ui-follower-bg text-xs leading-snug">{background}</div>
         )}
         {skills.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-0.5">
             {skills.map((skill) => (
               <span
                 key={skill}
-                className="text-xs px-1.5 py-0.5 rounded bg-purple-800/40 text-purple-300"
+                className="ui-skill-tag text-xs px-1.5 py-0.5 rounded"
               >
                 {skill}
               </span>

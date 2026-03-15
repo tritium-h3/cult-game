@@ -72,9 +72,7 @@ export function Slot({ id, dx, dy, locked = false, emptyLabel = 'Drop card here'
       <div
         className={[
           'absolute inset-2 rounded border-2',
-          isOccupied
-            ? 'border-amber-500/60 bg-amber-900/10'
-            : 'border-dashed border-amber-500/30 bg-black/10',
+          isOccupied ? 'ui-slot-occupied' : 'ui-slot-empty border-dashed',
           className,
         ]
           .filter(Boolean)
@@ -82,13 +80,13 @@ export function Slot({ id, dx, dy, locked = false, emptyLabel = 'Drop card here'
       >
         {!isOccupied && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 pointer-events-none">
-            <span className="text-xs text-amber-500/40 text-center px-2">{emptyLabel}</span>
-            {locked && <span className="text-xs text-amber-600/50">locked</span>}
+            <span className="ui-slot-label text-xs text-center px-2">{emptyLabel}</span>
+            {locked && <span className="ui-slot-locked-icon text-xs">locked</span>}
           </div>
         )}
         {isOccupied && locked && (
           <div className="absolute bottom-1 right-1 pointer-events-none">
-            <span className="text-xs text-amber-600/60">⚿</span>
+            <span className="ui-slot-locked-icon text-xs">⚿</span>
           </div>
         )}
       </div>

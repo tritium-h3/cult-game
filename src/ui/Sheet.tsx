@@ -63,7 +63,7 @@ export function Sheet({ gx, gy, cols, rows, children, className = '' }: SheetPro
             sheet's edge and any card content in adjacent cells. */}
         <div
           className={[
-            'absolute -inset-[30px] rounded-lg border border-amber-600/30 bg-black/40 backdrop-blur-sm pointer-events-none',
+            'absolute -inset-[30px] rounded-lg pointer-events-none ui-sheet-bg',
             className,
           ]
             .filter(Boolean)
