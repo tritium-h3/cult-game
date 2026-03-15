@@ -82,43 +82,6 @@ function DivinationCard({ cardId }: { cardId: string }) {
   );
 }
 
-// ── Ghost slot visual (future, unrevealed step) ───────────────────────────
-function GhostSlot({ dx, spreadIndex }: { dx: number; spreadIndex: number }) {
-  const spread = CARD_SPREADS[spreadIndex];
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        left: dx * GRID,
-        top: SLOT_DY * GRID,
-        width: 2 * GRID,
-        height: 3 * GRID, // matches default cardH: 3
-      }}
-    >
-      <div
-        className="absolute inset-2 rounded border-2 border-dashed flex flex-col items-center justify-center gap-1"
-        style={{
-          borderColor: 'rgba(120,53,15,0.14)',
-          background: 'rgba(0,0,0,0.08)',
-        }}
-      >
-        <div
-          className="font-serif text-xs text-center px-2 leading-snug"
-          style={{ color: 'rgba(120,53,15,0.22)' }}
-        >
-          {spread.title}
-        </div>
-        <div
-          className="text-xs text-center px-2 leading-snug"
-          style={{ color: 'rgba(120,53,15,0.15)' }}
-        >
-          {spread.meaning}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function CultCardSelection() {
   // ── Selection state ────────────────────────────────────────────────
   const [currentSpreadIndex, setCurrentSpreadIndex] = useState(0);
@@ -595,10 +558,10 @@ export default function CultCardSelection() {
             </div>
           ))}
 
-          {/* ── Slots: past (locked) + active + future (ghost) ── */}
+          {/* ── Slots: past (locked) + active; future steps not yet rendered ── */}
           {SLOT_DXS.map((dx, idx) => {
             if (idx > currentSpreadIndex) {
-              return <GhostSlot key={`ghost-${idx}`} dx={dx} spreadIndex={idx} />;
+              return null;
             }
             return (
               <Slot
