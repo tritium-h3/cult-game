@@ -14,11 +14,8 @@ interface TableInnerProps {
 function TableInner({ children, onSlotDrop }: TableInnerProps) {
   const { config, cards, drag, slotRegistry, setSlotCard, findCollision, commitDrag, revertDrag } = useTable();
 
-  // Track live cursor position during drag without triggering re-renders.
-  // The dragged card's visual position is updated via direct DOM style in useDrag,
-  // not through React state, so intermediate positions stay off the render cycle.
-  const cursorPos = useRef({ x: 0, y: 0 });
   const tableRef = useRef<HTMLDivElement>(null);
+  const cursorPos = useRef({ x: 0, y: 0 });
 
   const handleMouseMove = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
@@ -80,38 +77,13 @@ function TableInner({ children, onSlotDrop }: TableInnerProps) {
         return;
       }
 
-      // Slot proximity check — card center in table space.
-      const cardPxW = config.cardW * gridSize;
-      const cardPxH = config.cardH * gridSize;
-      const cardCenterX = e.clientX - tableRect.left - cursorOffsetX + cardPxW / 2;
-      const cardCenterY = e.clientY - tableRect.top - cursorOffsetY + cardPxH / 2;
-
+      // Slot detection — all slots are grid-aligned, so a simple position match suffices.
+      // No DOM measurement needed.
       let targetSlotId: string | undefined;
-      let slotGx = clampedGx;
-      let slotGy = clampedGy;
-
       for (const [slotId, entry] of Object.entries(slotRegistry.current)) {
-        const rect = entry.getRect();
-        // Convert slot rect to table-local coords.
-        const slotLeft = rect.left - tableRect.left;
-        const slotTop = rect.top - tableRect.top;
-        const slotRight = slotLeft + rect.width;
-        const slotBottom = slotTop + rect.height;
-
-        if (
-          cardCenterX >= slotLeft &&
-          cardCenterX <= slotRight &&
-          cardCenterY >= slotTop &&
-          cardCenterY <= slotBottom
-        ) {
-          // Don't allow dropping on a slot occupied by a different card.
-          if (entry.cardId && entry.cardId !== cardId) break;
-
+        if (entry.gx === clampedGx && entry.gy === clampedGy) {
           targetSlotId = slotId;
-          // Snap card origin to slot origin.
-          slotGx = Math.round(slotLeft / gridSize);
-          slotGy = Math.round(slotTop / gridSize);
-          console.log(`[Table] Card ${cardId} dropped onto slot ${slotId}`);
+          console.log(`[Table] Card ${cardId} dropped onto slot ${slotId} at (${clampedGx},${clampedGy})`);
           break;
         }
       }
@@ -125,13 +97,10 @@ function TableInner({ children, onSlotDrop }: TableInnerProps) {
         setSlotCard(targetSlotId, cardId);
       }
 
-      const finalGx = targetSlotId ? slotGx : clampedGx;
-      const finalGy = targetSlotId ? slotGy : clampedGy;
-
-      commitDrag(cardId, finalGx, finalGy, targetSlotId);
+      commitDrag(cardId, clampedGx, clampedGy, targetSlotId);
       if (targetSlotId) onSlotDrop?.(targetSlotId, cardId);
 
-      console.log(`[Table] Card ${cardId} settled at grid (${finalGx},${finalGy})${targetSlotId ? ` in slot ${targetSlotId}` : ''}`);
+      console.log(`[Table] Card ${cardId} settled at grid (${clampedGx},${clampedGy})${targetSlotId ? ` in slot ${targetSlotId}` : ''}`);
     },
     [drag, cards, config, commitDrag, revertDrag, slotRegistry, setSlotCard, findCollision, onSlotDrop]
   );

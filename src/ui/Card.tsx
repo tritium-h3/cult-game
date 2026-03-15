@@ -80,14 +80,17 @@ export function Card({ id, locked = false, children, className = '' }: CardProps
         transition: 'none',
       }}
       className={[
-        'rounded',
         locked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
         className,
       ]
         .filter(Boolean)
         .join(' ')}
     >
-      {children}
+      {/* Inset wrapper — keeps card content 8px from the grid boundary,
+          matching the visual slot indicator so cards align with slots on drop. */}
+      <div className="absolute inset-2 rounded overflow-hidden">
+        {children}
+      </div>
     </div>
   );
 }

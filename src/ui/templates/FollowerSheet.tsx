@@ -1,5 +1,6 @@
 import React from 'react';
 import { Slot } from '../Slot';
+import { useTable } from '../context';
 
 interface FollowerSheetProps {
   /** Follower's display name. */
@@ -10,9 +11,9 @@ interface FollowerSheetProps {
   skills?: string[];
   /**
    * Slot definitions for this follower.
-   * Each entry needs a unique id scoped to the table, and an optional locked flag.
+   * dx/dy are grid-unit offsets from the containing Sheet's origin.
    */
-  slots: Array<{ id: string; locked?: boolean; label?: string }>;
+  slots: Array<{ id: string; dx: number; dy: number; locked?: boolean; label?: string }>;
 }
 
 /**
@@ -36,16 +37,27 @@ interface FollowerSheetProps {
  *   </Sheet>
  */
 export function FollowerSheet({ name, background, skills = [], slots }: FollowerSheetProps) {
+  const { config } = useTable();
+  const { gridSize } = config;
+
+  // Reserve the info section height up to the topmost slot row.
+  const minSlotDy = slots.length > 0 ? Math.min(...slots.map(s => s.dy)) : 2;
+  const infoHeightPx = minSlotDy * gridSize;
+
   return (
-    <div className="h-full w-full flex flex-col p-3 gap-3 text-amber-100">
-      {/* Header */}
-      <div className="flex flex-col gap-0.5 border-b border-amber-600/20 pb-2">
-        <div className="font-serif text-lg font-bold text-amber-300">{name}</div>
+    // position: relative so absolutely-positioned Slots are contained here.
+    <div className="relative h-full w-full text-amber-100">
+      {/* Info section — height matches the space above the first slot row */}
+      <div
+        style={{ height: infoHeightPx, overflow: 'hidden' }}
+        className="flex flex-col justify-center px-3 gap-1 border-b border-amber-600/20"
+      >
+        <div className="font-serif text-base font-bold text-amber-300 leading-tight">{name}</div>
         {background && (
           <div className="text-xs text-amber-200/60 leading-snug">{background}</div>
         )}
         {skills.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1">
+          <div className="flex flex-wrap gap-1 mt-0.5">
             {skills.map((skill) => (
               <span
                 key={skill}
@@ -58,20 +70,17 @@ export function FollowerSheet({ name, background, skills = [], slots }: Follower
         )}
       </div>
 
-      {/* Slots */}
-      <div className="flex flex-col gap-2">
-        <div className="text-xs text-amber-500/60 uppercase tracking-wider">Assignments</div>
-        <div className="flex flex-wrap gap-2">
-          {slots.map((slot) => (
-            <Slot
-              key={slot.id}
-              id={slot.id}
-              locked={slot.locked}
-              emptyLabel={slot.label ?? 'Drop card here'}
-            />
-          ))}
-        </div>
-      </div>
+      {/* Slots — absolutely positioned at their grid-aligned offsets */}
+      {slots.map((slot) => (
+        <Slot
+          key={slot.id}
+          id={slot.id}
+          dx={slot.dx}
+          dy={slot.dy}
+          locked={slot.locked}
+          emptyLabel={slot.label ?? 'Drop card here'}
+        />
+      ))}
     </div>
   );
 }

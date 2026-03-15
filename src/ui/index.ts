@@ -3,7 +3,7 @@
 
 export { Table } from './Table';
 export { Card } from './Card';
-export { Sheet } from './Sheet';
+export { Sheet, SheetContext, useSheet } from './Sheet';
 export { Slot } from './Slot';
 export { useTable, TableProvider } from './context';
 export { useDrag } from './hooks/useDrag';
@@ -16,3 +16,4 @@ export type {
   SlotEntry,
   GridPos,
 } from './types';
+export type { SheetContextValue } from './Sheet';

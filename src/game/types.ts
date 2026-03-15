@@ -43,7 +43,7 @@ export interface Goal {
 }
 
 export type SkillClass = "social" | "intellectual" | "physical" | "practical";
-export type KnowledgeItemType = 'site' | 'book' | 'patron' | 'artifact';
+export type HookItemType = 'site' | 'book' | 'patron' | 'artifact';
 
 export interface Skill {
   id: string;
@@ -86,7 +86,7 @@ export interface Action {
     id: string;
     title: string;
     description: string;
-    type?: KnowledgeItemType;
+    type?: HookItemType;
     outcomes: Outcome[];
 }
 

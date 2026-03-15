@@ -1,9 +1,9 @@
 import React from 'react';
 
-export type KnowledgeItemType = 'site' | 'book' | 'patron' | 'artifact';
+export type HookItemType = 'site' | 'book' | 'patron' | 'artifact';
 
 const TYPE_CONFIG: Record<
-  KnowledgeItemType,
+  HookItemType,
   { label: string; badgeClass: string; titleClass: string; borderClass: string }
 > = {
   site: {
@@ -32,29 +32,29 @@ const TYPE_CONFIG: Record<
   },
 };
 
-interface KnowledgeCardProps {
-  type: KnowledgeItemType;
+interface HookCardProps {
+  type: HookItemType;
   title: string;
   description?: string;
 }
 
 /**
- * Example card template for knowledge items in the cult game.
+ * Example card template for hook items in the cult game.
  *
  * This is a *non-normative* template — it documents a recommended visual pattern
  * but library consumers are free to use any children inside <Card>.
  *
  * Usage:
  *   <Card id="book-1">
- *     <KnowledgeCard type="book" title="Necronomicon" description="A tome of forbidden lore." />
+ *     <HookCard type="book" title="Necronomicon" description="A tome of forbidden lore." />
  *   </Card>
  */
-export function KnowledgeCard({ type, title, description }: KnowledgeCardProps) {
+export function HookCard({ type, title, description }: HookCardProps) {
   const cfg = TYPE_CONFIG[type];
 
   return (
     <div
-      className={`h-full w-full flex flex-col rounded overflow-hidden border ${cfg.borderClass} bg-purple-900/30 hover:bg-purple-900/50 transition-colors`}
+      className={`h-full w-full flex flex-col rounded overflow-hidden border ${cfg.borderClass} bg-purple-950 hover:bg-purple-900 transition-colors`}
     >
       {/* Type badge header */}
       <div className={`px-2 py-1 text-xs font-semibold rounded-t ${cfg.badgeClass}`}>
@@ -67,7 +67,7 @@ export function KnowledgeCard({ type, title, description }: KnowledgeCardProps) 
           {title}
         </div>
         {description && (
-          <div className="text-xs text-amber-200/60 leading-snug line-clamp-4">
+          <div className="text-xs text-amber-200/80 leading-snug line-clamp-4">
             {description}
           </div>
         )}

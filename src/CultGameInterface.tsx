@@ -195,7 +195,7 @@ export default function CultGameInterface() {
     console.log('items found:', items.length);
     console.log('=== END DEBUG ===');
 
-    // Group items by knowledge type
+    // Group items by hook type
     const itemsByType: Record<string, Action[]> = { site: [], book: [], patron: [], artifact: [] };
     items.forEach(item => itemsByType[item.type ?? 'site'].push(item));
 
@@ -340,7 +340,7 @@ export default function CultGameInterface() {
                                   </div>
                                 ) : (
                                   <div className="flex items-center justify-center h-full">
-                                    <p className="text-xs text-amber-300/30">Drop knowledge here</p>
+                                    <p className="text-xs text-amber-300/30">Drop hook here</p>
                                   </div>
                                 )}
                               </div>

@@ -59,12 +59,15 @@ export interface DragState {
 
 /**
  * An entry in the slot registry.
- * Slots register themselves here on mount so drop detection can find their rects.
+ * Slots register themselves here on mount so drop detection can find them.
+ * All positions are in grid units (always grid-aligned).
  */
 export interface SlotEntry {
   slotId: string;
-  /** Callback to get the slot's current bounding rect in screen space. */
-  getRect: () => DOMRect;
+  /** Absolute grid column of this slot's upper-left corner on the table. */
+  gx: number;
+  /** Absolute grid row of this slot's upper-left corner on the table. */
+  gy: number;
   /** If true, a card placed here cannot be removed by the user. */
   locked: boolean;
   /** The card currently occupying this slot, if any. */

@@ -32,10 +32,12 @@ const [cards, setCards] = useState<Record<string, CardData>>({
 
 <Table cards={cards} onCardsChange={setCards} onSlotDrop={handleDrop}>
 
-  {/* Sheets are plain React children — conditionally render or map over them */}
-  <Sheet x={560} y={80} width={400} height={500}>
-    <Slot id="slot-1" emptyLabel="Drop here" />
-    <Slot id="slot-2" locked emptyLabel="Permanent assignment" />
+  {/* Sheets are plain React children — conditionally render or map over them.
+       All positioning is in grid units (1 unit = 80px by default). */}
+  <Sheet gx={7} gy={1} cols={5} rows={7}>
+    {/* dx/dy are grid-unit offsets from the sheet's own gx/gy */}
+    <Slot id="slot-1" dx={0} dy={2} emptyLabel="Drop here" />
+    <Slot id="slot-2" dx={2} dy={2} locked emptyLabel="Permanent assignment" />
   </Sheet>
 
   {/* One Card per entry in cards — id must match the key */}
@@ -82,9 +84,11 @@ Sheets are React children, so they're fully dynamic — conditionally render the
 
 ```tsx
 {followers.map(f => (
-  <Sheet key={f.id} x={sheetX(f)} y={sheetY(f)} width={400} height={500}>
-    {f.slots.map((slot, i) => (
-      <Slot key={slot.id} id={slot.id} locked={slot.locked} />
+  // gx/gy/cols/rows are all in grid units
+  <Sheet key={f.id} gx={f.sheetGx} gy={f.sheetGy} cols={4} rows={8}>
+    {f.slots.map(slot => (
+      // dx/dy are offsets from the sheet's gx/gy, also in grid units
+      <Slot key={slot.id} id={slot.id} dx={slot.dx} dy={slot.dy} locked={slot.locked} />
     ))}
   </Sheet>
 ))}
@@ -128,6 +132,25 @@ The `locked` prop can be toggled at runtime — if a slot is unlocked after a ca
 | `onSlotDrop` | `(slotId, cardId) => void` | No | Called when a card lands in a slot |
 | `config` | `Partial<TableConfig>` | No | Override grid/card size constants |
 
+## `Sheet` Props
+
+| Prop | Type | Description |
+|---|---|---|
+| `gx` | `number` | Grid column of upper-left corner (table-absolute) |
+| `gy` | `number` | Grid row of upper-left corner (table-absolute) |
+| `cols` | `number` | Width in grid cells |
+| `rows` | `number` | Height in grid cells |
+
+## `Slot` Props
+
+| Prop | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique id scoped to the table |
+| `dx` | `number` | Grid-unit offset from sheet's `gx` |
+| `dy` | `number` | Grid-unit offset from sheet's `gy` |
+| `locked` | `boolean?` | If true, placed card cannot be removed |
+| `emptyLabel` | `string?` | Text shown when slot is empty |
+
 ## `TableConfig` Defaults
 
 ```ts
@@ -149,22 +172,25 @@ interface CardData {
 
 ## Example Templates (non-normative)
 
-`src/ui/templates/KnowledgeCard.tsx` and `src/ui/templates/FollowerSheet.tsx` are example implementations showing a recommended visual pattern for the cult game. They are **not required** — any React children work inside `<Card>` and `<Sheet>`. Use them as reference or a starting point.
+`src/ui/templates/HookCard.tsx` and `src/ui/templates/FollowerSheet.tsx` are example implementations showing a recommended visual pattern for the cult game. They are **not required** — any React children work inside `<Card>` and `<Sheet>`. Use them as reference or a starting point.
 
 ```tsx
-import { KnowledgeCard } from './ui/templates/KnowledgeCard';
+import { HookCard } from './ui/templates/HookCard';
 import { FollowerSheet } from './ui/templates/FollowerSheet';
 
 <Card id="book-1">
-  <KnowledgeCard type="book" title="Necronomicon" description="Forbidden lore." />
+  <HookCard type="book" title="Necronomicon" description="Forbidden lore." />
 </Card>
 
-<Sheet x={560} y={80} width={400} height={500}>
+<Sheet gx={7} gy={1} cols={4} rows={8}>
   <FollowerSheet
     name="Elara Mourne"
     background="Former archivist."
     skills={['Research', 'Deception']}
-    slots={[{ id: 'elara-0' }, { id: 'elara-1', locked: true }]}
+    slots={[
+      { id: 'elara-0', dx: 0, dy: 2 },
+      { id: 'elara-1', dx: 0, dy: 5, locked: true },
+    ]}
   />
 </Sheet>
 ```
@@ -185,7 +211,7 @@ src/ui/
   hooks/
     useDrag.ts               mousedown handler factory
   templates/
-    KnowledgeCard.tsx        Example: site/book/patron/artifact card face
+    HookCard.tsx             Example: site/book/patron/artifact card face
     FollowerSheet.tsx        Example: follower sheet with slot row
   USAGE.md                   This file
 ```
