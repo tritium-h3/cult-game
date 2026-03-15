@@ -1,0 +1,82 @@
+/*
+ * Table UI Kit — Visual Theme
+ *
+ * All colors, backgrounds, and decorative styling live here.
+ * Layout, spacing, typography sizes, and structure stay in the components.
+ * Tweak this file to retheme the game without touching component code.
+ */
+
+@layer components {
+
+  /* ── Hook cards ──────────────────────────────────────────────────── */
+
+  .ui-hook-card {
+    background-color: #2e2416;
+    border-color: var(--card-border, #4a3828);
+    transition: background-color 120ms;
+  }
+  .ui-hook-card:hover { background-color: #3a2e1c; }
+
+  /* Per-type custom properties — all four colours change together */
+  .ui-hook-card[data-type="site"] {
+    --card-border: rgb(146 64 14 / .5);
+    --badge-bg:    rgb(146 64 14 / .85);
+    --badge-fg:    rgb(254 243 199);
+    --title:       rgb(253 230 138);
+  }
+  .ui-hook-card[data-type="book"] {
+    --card-border: rgb(67 56 202 / .5);
+    --badge-bg:    rgb(67 56 202 / .85);
+    --badge-fg:    rgb(224 231 255);
+    --title:       rgb(199 210 254);
+  }
+  .ui-hook-card[data-type="patron"] {
+    --card-border: rgb(15 118 110 / .5);
+    --badge-bg:    rgb(15 118 110 / .85);
+    --badge-fg:    rgb(204 251 241);
+    --title:       rgb(153 246 228);
+  }
+  .ui-hook-card[data-type="artifact"] {
+    --card-border: rgb(159 18 57 / .5);
+    --badge-bg:    rgb(159 18 57 / .85);
+    --badge-fg:    rgb(255 228 230);
+    --title:       rgb(254 205 211);
+  }
+
+  .ui-hook-badge { background-color: var(--badge-bg); color: var(--badge-fg); }
+  .ui-hook-title { color: var(--title); }
+  .ui-hook-body  { color: rgb(168 162 158); } /* stone-400 */
+
+  /* ── Sheet ───────────────────────────────────────────────────────── */
+
+  .ui-sheet-bg {
+    background-color: #1e1608;
+    border: 1px solid rgb(120 53 15 / .5);
+  }
+
+  /* ── Follower sheet ──────────────────────────────────────────────── */
+
+  .ui-follower-name     { color: rgb(253 230 138); }  /* amber-200 */
+  .ui-follower-bg       { color: rgb(168 162 158); }  /* stone-400 */
+  .ui-follower-divider  { border-color: rgb(120 53 15 / .4); }
+
+  .ui-skill-tag {
+    background-color: rgb(120 53 15 / .4);
+    color: rgb(252 211 77);                           /* amber-300 */
+  }
+
+  /* ── Slot indicator ──────────────────────────────────────────────── */
+
+  .ui-slot-empty {
+    border-color: rgb(120 53 15 / .4);
+    background-color: rgb(0 0 0 / .2);
+  }
+  .ui-slot-occupied {
+    border-style: solid;
+    border-color: rgb(180 83 9 / .5);
+    background-color: rgb(120 53 15 / .2);
+  }
+
+  .ui-slot-label       { color: rgb(120 53 15 / .6); }
+  .ui-slot-locked-icon { color: rgb(120 53 15 / .5); }
+}
