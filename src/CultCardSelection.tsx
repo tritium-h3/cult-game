@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Sparkles, User, Users, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import './Game.css';
@@ -7,7 +7,6 @@ import { CARD_SPREADS } from './game/reading';
 import type { Card as TarotCardType } from './game/types';
 import { getCityById, CITIES } from './game/world';
 import { useGameSocket } from './hooks/useGameSocket';
-import { setGameId } from './game/gameId';
 
 // ── Grid layout constants (1 unit = 80px, default cardW=2 cardH=3 → 160×240px) ──
 const GRID = 80;
@@ -95,6 +94,8 @@ export default function CultCardSelection() {
   // ── Phase / narrative state ────────────────────────────────────────
   const [readingState, setNarrativeState] = useState<'selection' | 'naming' | 'narrating' | 'ready'>('selection');
   const [narrative, setNarrative] = useState<string>('');
+  const [pendingGameId, setPendingGameId] = useState<string | null>(null);
+  const pendingGameIdRef = useRef<string | null>(null);
   const navigate = useNavigate();
   const { send, subscribe } = useGameSocket();
 
@@ -174,9 +175,11 @@ export default function CultCardSelection() {
     const unsubChunk = subscribe('NARRATIVE_CHUNK', (chunk: string) => {
       setNarrative(prev => prev + chunk);
     });
-    const unsubDone = subscribe('READING_DONE', ({ gameId }: { gameId: string }) => {
-      console.log('Reading done, game', gameId, 'navigating to /game');
-      setGameId(gameId);
+    const unsubDone = subscribe('READING_DONE', (payload: any) => {
+      const gameId: string = payload?.gameId;
+      console.log('Reading done, full payload:', payload, '| gameId:', gameId);
+      pendingGameIdRef.current = gameId;
+      setPendingGameId(gameId);
       setNarrativeState('ready');
     });
     const unsubError = subscribe('ERROR', (payload: { message: string }) => {
@@ -435,7 +438,11 @@ export default function CultCardSelection() {
               Begin Another Reading
             </button>
             <button
-              onClick={() => navigate('/game')}
+              onClick={() => {
+                const id = pendingGameIdRef.current;
+                console.log('Navigating to game, id:', id);
+                navigate(`/game/${id}`);
+              }}
               className="px-6 py-3 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
               disabled={readingState !== 'ready'}
             >

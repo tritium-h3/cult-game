@@ -14,9 +14,9 @@ createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<CultCardSelection />} />
-        <Route path="/game" element={<CultGameInterface />} />
+        <Route path="/game/:gameId" element={<CultGameInterface />} />
         <Route path="/sample" element={<LoadSampleMode />} />
-        <Route path="/clear" element={<ClearStorage />} />
+        <Route path="/clear/:gameId" element={<ClearStorage />} />
         <Route path="/magic" element={<MagicPrototype />} />
         <Route path="/demo" element={<UIDemo />} />
       </Routes>

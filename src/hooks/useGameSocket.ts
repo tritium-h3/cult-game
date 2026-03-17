@@ -52,6 +52,12 @@ function connect(): void {
   socket.onopen = () => {
     console.log('[ws] Connected');
     notifyConnectionState(true);
+    // Flush any messages that were sent before the socket was ready
+    if (pendingMessages.length > 0) {
+      console.log('[ws] Flushing', pendingMessages.length, 'queued message(s)');
+      pendingMessages.forEach(msg => socket!.send(JSON.stringify(msg)));
+      pendingMessages = [];
+    }
   };
 
   socket.onmessage = (event) => {
@@ -79,6 +85,8 @@ function connect(): void {
 }
 
 // Start connecting immediately when this module is imported
+let pendingMessages: { type: string; payload?: any }[] = [];
+
 if (typeof window !== 'undefined') {
   connect();
 }
@@ -107,7 +115,8 @@ export function useGameSocket(): GameSocketAPI {
       console.log('[ws] ←', message.type);
       socket.send(JSON.stringify(message));
     } else {
-      console.warn('[ws] Cannot send, not connected:', message.type);
+      console.log('[ws] ← (queued)', message.type);
+      pendingMessages.push(message);
     }
   }, []);
 

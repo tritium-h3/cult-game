@@ -1,11 +1,10 @@
 import React, { useState, useEffect, DragEvent } from 'react';
 import { MapPin, User, Calendar } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import "./Game.css"
 import { getCityById } from './game/world';
 import { City, Follower, GameState } from './game/types';
 import { useGameSocket } from './hooks/useGameSocket';
-import { getGameId } from './game/gameId';
 
 /** Serialisable action shape received from the server (no function-bearing Outcome objects) */
 interface ClientAction {
@@ -34,9 +33,14 @@ export default function CultGameInterface() {
   const [draggedItem, setDraggedItem] = useState<{ itemId: string; fromSlotKey: string | null } | null>(null);
   const [weekResults, setWeekResults] = useState<ClientWeekResults | null>(null);
   const navigate = useNavigate();
+  const { gameId } = useParams<{ gameId: string }>();
   const { send, subscribe } = useGameSocket();
 
   useEffect(() => {
+    if (!gameId) {
+      navigate('/');
+      return;
+    }
     // Subscribe to incoming state and week-results messages
     const unsubState = subscribe('STATE', ({ state }: { gameId: string; state: GameState }) => {
       console.log('[game] Received STATE from server');
@@ -55,13 +59,6 @@ export default function CultGameInterface() {
       console.error('[game] Server error:', payload.message);
     });
 
-    // Request state from server
-    const gameId = getGameId();
-    if (!gameId) {
-      console.log('[game] No gameId in localStorage, redirecting to card selection');
-      navigate('/');
-      return;
-    }
     send({ type: 'GET_STATE', payload: { gameId } });
 
     return () => {
@@ -70,7 +67,7 @@ export default function CultGameInterface() {
       unsubWeekResults();
       unsubError();
     };
-  }, [navigate, send, subscribe]);
+  }, [gameId, navigate, send, subscribe]);
 
   const handleItemDragStart = (e: DragEvent<HTMLDivElement>, itemId: string, fromSlotKey: string | null = null) => {
     setDraggedItem({ itemId, fromSlotKey });
@@ -112,7 +109,11 @@ export default function CultGameInterface() {
   };
 
   if (!gameState) {
-    return null;
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 flex items-center justify-center">
+        <div className="text-amber-500/60 text-lg font-serif animate-pulse">Consulting the void…</div>
+      </div>
+    );
   }
 
   // Map view
@@ -368,7 +369,6 @@ export default function CultGameInterface() {
                     className="px-4 py-2 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors text-sm"
                     onClick={() => {
                       console.log('Completing week with assignments:', assignments);
-                      const gameId = getGameId();
                       if (!gameId) return;
                       send({
                         type: 'COMPLETE_WEEK',
@@ -448,7 +448,6 @@ export default function CultGameInterface() {
                 className="px-8 py-4 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors text-lg"
                 onClick={() => {
                   // Tell server to apply outcomes and advance week
-                  const gameId = getGameId();
                   if (gameId) send({ type: 'ACCEPT_WEEK_RESULTS', payload: { gameId } });
                   // Optimistically update local state from what the server sent
                   setGameState({ ...updatedState });
