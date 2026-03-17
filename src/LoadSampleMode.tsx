@@ -1,15 +1,17 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameSocket } from './hooks/useGameSocket';
+import { setGameId } from './game/gameId';
 
 export default function LoadSampleMode() {
   const navigate = useNavigate();
   const { send, subscribe } = useGameSocket();
 
   useEffect(() => {
-    // Ask the server to load the hardcoded sample state
-    const unsub = subscribe('STATE', () => {
-      console.log('[sample] Server loaded sample state, navigating to /game');
+    // Ask the server to create a new sample game and return its id
+    const unsub = subscribe('STATE', ({ gameId }: { gameId: string }) => {
+      console.log('[sample] Server created sample game', gameId, 'navigating to /game');
+      setGameId(gameId);
       navigate('/game');
       unsub();
     });

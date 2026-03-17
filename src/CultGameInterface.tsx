@@ -5,6 +5,7 @@ import "./Game.css"
 import { getCityById } from './game/world';
 import { City, Follower, GameState } from './game/types';
 import { useGameSocket } from './hooks/useGameSocket';
+import { getGameId } from './game/gameId';
 
 /** Serialisable action shape received from the server (no function-bearing Outcome objects) */
 interface ClientAction {
@@ -16,6 +17,7 @@ interface ClientAction {
 
 /** Week-results payload from the server */
 interface ClientWeekResults {
+  gameId: string;
   results: Record<string, { outcomeId: string; description: string }>;
   updatedState: GameState;
   assignments: Record<string, string>;
@@ -36,9 +38,9 @@ export default function CultGameInterface() {
 
   useEffect(() => {
     // Subscribe to incoming state and week-results messages
-    const unsubState = subscribe('STATE', (payload: GameState) => {
+    const unsubState = subscribe('STATE', ({ state }: { gameId: string; state: GameState }) => {
       console.log('[game] Received STATE from server');
-      setGameState(payload);
+      setGameState(state);
     });
     const unsubNoState = subscribe('NO_STATE', () => {
       console.log('[game] No state on server, redirecting to card selection');
@@ -54,7 +56,13 @@ export default function CultGameInterface() {
     });
 
     // Request state from server
-    send({ type: 'GET_STATE' });
+    const gameId = getGameId();
+    if (!gameId) {
+      console.log('[game] No gameId in localStorage, redirecting to card selection');
+      navigate('/');
+      return;
+    }
+    send({ type: 'GET_STATE', payload: { gameId } });
 
     return () => {
       unsubState();
@@ -360,9 +368,12 @@ export default function CultGameInterface() {
                     className="px-4 py-2 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors text-sm"
                     onClick={() => {
                       console.log('Completing week with assignments:', assignments);
+                      const gameId = getGameId();
+                      if (!gameId) return;
                       send({
                         type: 'COMPLETE_WEEK',
                         payload: {
+                          gameId,
                           assignments,
                           cityId: selectedLocation?.id ?? gameState.hqLocation,
                         },
@@ -437,7 +448,8 @@ export default function CultGameInterface() {
                 className="px-8 py-4 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors text-lg"
                 onClick={() => {
                   // Tell server to apply outcomes and advance week
-                  send({ type: 'ACCEPT_WEEK_RESULTS' });
+                  const gameId = getGameId();
+                  if (gameId) send({ type: 'ACCEPT_WEEK_RESULTS', payload: { gameId } });
                   // Optimistically update local state from what the server sent
                   setGameState({ ...updatedState });
                   setWeekResults(null);

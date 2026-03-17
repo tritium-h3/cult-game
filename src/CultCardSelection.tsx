@@ -7,6 +7,7 @@ import { CARD_SPREADS } from './game/reading';
 import type { Card as TarotCardType } from './game/types';
 import { getCityById, CITIES } from './game/world';
 import { useGameSocket } from './hooks/useGameSocket';
+import { setGameId } from './game/gameId';
 
 // ── Grid layout constants (1 unit = 80px, default cardW=2 cardH=3 → 160×240px) ──
 const GRID = 80;
@@ -173,8 +174,9 @@ export default function CultCardSelection() {
     const unsubChunk = subscribe('NARRATIVE_CHUNK', (chunk: string) => {
       setNarrative(prev => prev + chunk);
     });
-    const unsubDone = subscribe('READING_DONE', () => {
-      console.log('Reading done, navigating to game');
+    const unsubDone = subscribe('READING_DONE', ({ gameId }: { gameId: string }) => {
+      console.log('Reading done, game', gameId, 'navigating to /game');
+      setGameId(gameId);
       setNarrativeState('ready');
     });
     const unsubError = subscribe('ERROR', (payload: { message: string }) => {

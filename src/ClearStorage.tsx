@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameSocket } from './hooks/useGameSocket';
+import { getGameId, clearGameId } from './game/gameId';
 
 export default function ClearStorage() {
   const [cleared, setCleared] = useState(false);
@@ -9,11 +10,13 @@ export default function ClearStorage() {
 
   useEffect(() => {
     const unsub = subscribe('RESET_OK', () => {
-      console.log('Server reset OK');
+      clearGameId();
+      console.log('Server reset OK, gameId cleared');
       setCleared(true);
       unsub();
     });
-    send({ type: 'RESET' });
+    const gameId = getGameId();
+    send({ type: 'RESET', payload: { gameId } });
     return unsub;
   }, [send, subscribe]);
 

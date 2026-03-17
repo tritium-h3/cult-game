@@ -1,6 +1,9 @@
 /**
  * Cult Game WebSocket Server
- * Runs on port 5174, handles all game logic and LLM interactions.
+ * Port 5174 — owns all game logic, LLM interactions, and per-game state.
+ *
+ * Each game has a UUID. The frontend stores its gameId in localStorage and
+ * includes it in every message that requires game context.
  *
  * Protocol:
  *   Client → Server: { type, payload? }
@@ -11,6 +14,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'crypto';
 
 import {
   completeWeek,
@@ -21,19 +25,22 @@ import {
 } from '../src/game/actions';
 import { getCityById, CITIES } from '../src/game/world';
 import {
-  CARD_SPREADS,
   generateInitialGameState,
   generateCultName,
   getNarrative,
   getGameState,
 } from '../src/game/reading';
-import { generateFollowers } from '../src/game/followers';
-import type { GameState, Action, Outcome, Follower, Card, ActionMap } from '../src/game/types';
+import type { GameState, Action, Outcome, Card, ActionMap } from '../src/game/types';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const STATE_FILE = path.join(__dirname, 'game-state.json');
+const GAMES_DIR = path.join(__dirname, 'games');
 const PORT = 5174;
 const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'torment-nexus.local';
+
+// Ensure games directory exists on startup
+if (!fs.existsSync(GAMES_DIR)) {
+  fs.mkdirSync(GAMES_DIR, { recursive: true });
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -52,6 +59,7 @@ type ClientGameState = Omit<GameState, 'map'> & {
 
 /** Outgoing week-results payload */
 interface ClientWeekResults {
+  gameId: string;
   results: Record<string, { outcomeId: string; description: string }>;
   updatedState: ClientGameState;
   assignments: Record<string, string>;
@@ -59,48 +67,61 @@ interface ClientWeekResults {
   cityId: string;
 }
 
-// ── Persisted server state ─────────────────────────────────────────────────
+// ── Persistence types ──────────────────────────────────────────────────────
 
 interface PersistedState {
   gameStateWithoutMap: Omit<GameState, 'map'>;
   actionMapJson: string;
 }
 
-/** Full runtime state (with live Action/Outcome objects) */
-let liveState: GameState | null = null;
-
-/** Pending week results waiting for ACCEPT_WEEK_RESULTS */
-let pendingWeekResults: {
+interface PendingWeekResults {
   results: Record<string, Outcome>;
   updatedState: GameState;
   assignments: Record<string, string>;
   items: Action[];
   cityId: string;
-} | null = null;
-
-function loadPersistedState(): void {
-  if (!fs.existsSync(STATE_FILE)) return;
-  try {
-    const raw = fs.readFileSync(STATE_FILE, 'utf-8');
-    const persisted: PersistedState = JSON.parse(raw);
-    const map: ActionMap = deserializeActionMap(persisted.actionMapJson);
-    liveState = { ...persisted.gameStateWithoutMap, map };
-    console.log('[state] Loaded from', STATE_FILE);
-  } catch (e) {
-    console.error('[state] Failed to load persisted state:', e);
-  }
 }
 
-function persistState(): void {
-  if (!liveState) return;
+interface GameEntry {
+  state: GameState;
+  pending: PendingWeekResults | null;
+}
+
+// ── Game store ─────────────────────────────────────────────────────────────
+
+const games = new Map<string, GameEntry>();
+
+function gameFilePath(gameId: string): string {
+  return path.join(GAMES_DIR, `${gameId}.json`);
+}
+
+function loadAllGames(): void {
+  const files = fs.readdirSync(GAMES_DIR).filter(f => f.endsWith('.json'));
+  for (const file of files) {
+    const gameId = path.basename(file, '.json');
+    try {
+      const raw = fs.readFileSync(path.join(GAMES_DIR, file), 'utf-8');
+      const persisted: PersistedState = JSON.parse(raw);
+      const map: ActionMap = deserializeActionMap(persisted.actionMapJson);
+      games.set(gameId, { state: { ...persisted.gameStateWithoutMap, map }, pending: null });
+      console.log(`[state] Loaded game ${gameId}`);
+    } catch (e) {
+      console.error(`[state] Failed to load game ${gameId}:`, e);
+    }
+  }
+  console.log(`[state] Loaded ${games.size} game(s)`);
+}
+
+function persistGame(gameId: string): void {
+  const entry = games.get(gameId);
+  if (!entry) return;
   try {
-    const { map, ...gameStateWithoutMap } = liveState;
+    const { map, ...gameStateWithoutMap } = entry.state;
     const actionMapJson = map ? serializeActionMap(map) : '{}';
-    const persisted: PersistedState = { gameStateWithoutMap, actionMapJson };
-    fs.writeFileSync(STATE_FILE, JSON.stringify(persisted, null, 2));
-    console.log('[state] Saved to', STATE_FILE);
+    fs.writeFileSync(gameFilePath(gameId), JSON.stringify({ gameStateWithoutMap, actionMapJson }, null, 2));
+    console.log(`[state] Saved game ${gameId}`);
   } catch (e) {
-    console.error('[state] Failed to persist state:', e);
+    console.error(`[state] Failed to persist game ${gameId}:`, e);
   }
 }
 
@@ -127,11 +148,16 @@ function toClientGameState(state: GameState): ClientGameState {
 
 // ── Message handlers ───────────────────────────────────────────────────────
 
-function handleGetState(ws: WebSocket): void {
-  if (!liveState) {
+function handleGetState(ws: WebSocket, gameId: string | undefined): void {
+  if (!gameId) {
+    send(ws, { type: 'NO_STATE' });
+    return;
+  }
+  const entry = games.get(gameId);
+  if (!entry) {
     send(ws, { type: 'NO_STATE' });
   } else {
-    send(ws, { type: 'STATE', payload: toClientGameState(liveState) });
+    send(ws, { type: 'STATE', payload: { gameId, state: toClientGameState(entry.state) } });
   }
 }
 
@@ -140,17 +166,14 @@ async function handleInitReading(
   payload: { selectedCards: Card[]; cultName: string; leaderName: string; cityId?: string }
 ): Promise<void> {
   const { selectedCards, cultName, leaderName, cityId } = payload;
+  const gameId = randomUUID();
 
-  console.log('[reading] Starting INIT_READING for:', cultName, '/', leaderName);
+  console.log(`[reading] New game ${gameId}: INIT_READING for ${cultName} / ${leaderName}`);
 
-  // Build game state template (pure logic, no LLM)
   const gameStateTemplate = await generateInitialGameState(selectedCards, cultName, leaderName, cityId);
   gameStateTemplate.cultName = cultName;
   gameStateTemplate.leader.name = leaderName;
 
-  console.log('[reading] Game state template generated');
-
-  // Stream narrative to client
   let narrativeText = '';
   const addToNarrative = (chunk: string) => {
     narrativeText += chunk;
@@ -159,29 +182,25 @@ async function handleInitReading(
 
   const fullNarrative = await getNarrative(selectedCards, gameStateTemplate, addToNarrative, OLLAMA_HOST);
   send(ws, { type: 'NARRATIVE_COMPLETE' });
-  console.log('[reading] Narrative streaming complete');
+  console.log(`[reading] Narrative complete for game ${gameId}`);
 
-  // Extract game state from narrative
   const extractedState = await getGameState(fullNarrative ?? '', gameStateTemplate, OLLAMA_HOST);
   if (!extractedState) {
     send(ws, { type: 'ERROR', payload: { message: 'Failed to extract game state from narrative.' } });
     return;
   }
 
-  // Preserve user-provided names
   extractedState.cultName = cultName;
   extractedState.leader.name = leaderName;
 
-  // Initialize action map for starting city
   const startCity = getCityById(extractedState.hqLocation) ?? CITIES[0];
   extractedState.map = { [startCity.id]: prototypeActionsForCity(startCity) };
 
-  liveState = extractedState;
-  pendingWeekResults = null;
-  persistState();
+  games.set(gameId, { state: extractedState, pending: null });
+  persistGame(gameId);
 
-  send(ws, { type: 'READING_DONE', payload: toClientGameState(liveState) });
-  console.log('[reading] Done, state saved');
+  send(ws, { type: 'READING_DONE', payload: { gameId, state: toClientGameState(extractedState) } });
+  console.log(`[reading] Game ${gameId} saved`);
 }
 
 async function handleGenerateCultName(
@@ -194,35 +213,34 @@ async function handleGenerateCultName(
 
 function handleCompleteWeek(
   ws: WebSocket,
-  payload: { assignments: Record<string, string>; cityId: string }
+  payload: { gameId: string; assignments: Record<string, string>; cityId: string }
 ): void {
-  if (!liveState) {
-    send(ws, { type: 'ERROR', payload: { message: 'No active game state.' } });
+  const { gameId, assignments, cityId } = payload;
+  const entry = games.get(gameId);
+  if (!entry) {
+    send(ws, { type: 'ERROR', payload: { message: `Game not found: ${gameId}` } });
     return;
   }
 
-  const { assignments, cityId } = payload;
-  const items = liveState.map?.[cityId] ?? [];
+  const items = entry.state.map?.[cityId] ?? [];
+  console.log(`[week] Game ${gameId}: completing week ${entry.state.week} with ${Object.keys(assignments).length} assignments`);
 
-  console.log('[week] Completing week', liveState.week, 'with', Object.keys(assignments).length, 'assignments');
+  const { results, updatedState } = completeWeek(assignments, items, entry.state);
 
-  const { results, updatedState } = completeWeek(assignments, items, liveState);
-
-  // Build client-safe results (serialize outcome descriptions now, before potential state mutation)
   const clientResults: Record<string, { outcomeId: string; description: string }> = {};
   for (const [slotKey, outcome] of Object.entries(results)) {
     const followerId = slotKey.split(':')[0];
-    const follower = liveState.followers.find(f => f.id === followerId);
+    const follower = entry.state.followers.find(f => f.id === followerId);
     clientResults[slotKey] = {
       outcomeId: outcome.id,
       description: follower ? outcome.getDescription(follower) : outcome.id,
     };
   }
 
-  // Store pending results for ACCEPT_WEEK_RESULTS
-  pendingWeekResults = { results, updatedState, assignments, items, cityId };
+  entry.pending = { results, updatedState, assignments, items, cityId };
 
   const clientPayload: ClientWeekResults = {
+    gameId,
     results: clientResults,
     updatedState: toClientGameState(updatedState),
     assignments,
@@ -233,36 +251,38 @@ function handleCompleteWeek(
   send(ws, { type: 'WEEK_RESULTS', payload: clientPayload });
 }
 
-function handleAcceptWeekResults(ws: WebSocket): void {
-  if (!pendingWeekResults) {
-    send(ws, { type: 'ERROR', payload: { message: 'No pending week results.' } });
+function handleAcceptWeekResults(ws: WebSocket, gameId: string | undefined): void {
+  if (!gameId) {
+    send(ws, { type: 'ERROR', payload: { message: 'gameId required for ACCEPT_WEEK_RESULTS' } });
+    return;
+  }
+  const entry = games.get(gameId);
+  if (!entry || !entry.pending) {
+    send(ws, { type: 'ERROR', payload: { message: `No pending week results for game: ${gameId}` } });
     return;
   }
 
-  const { results, updatedState, assignments, cityId } = pendingWeekResults;
+  const { results, updatedState, assignments, cityId } = entry.pending;
 
-  // Enact outcomes (mutates updatedState)
   enactCityActions(assignments, results, updatedState);
 
-  // Sync action map (enacting may have added new actions)
-  liveState = updatedState;
+  entry.state = updatedState;
+  entry.pending = null;
 
-  // Ensure start city map exists after enactment
-  if (liveState.map) {
+  if (entry.state.map) {
     const city = getCityById(cityId);
-    if (city && (!liveState.map[city.id] || liveState.map[city.id].length === 0)) {
-      liveState.map[city.id] = prototypeActionsForCity(city);
+    if (city && (!entry.state.map[city.id] || entry.state.map[city.id].length === 0)) {
+      entry.state.map[city.id] = prototypeActionsForCity(city);
     }
   }
 
-  pendingWeekResults = null;
-  persistState();
-
-  console.log('[week] Results enacted, new week:', liveState.week);
-  send(ws, { type: 'STATE', payload: toClientGameState(liveState) });
+  persistGame(gameId);
+  console.log(`[week] Game ${gameId}: results enacted, now week ${entry.state.week}`);
+  send(ws, { type: 'STATE', payload: { gameId, state: toClientGameState(entry.state) } });
 }
 
 function handleLoadSample(ws: WebSocket): void {
+  const gameId = randomUUID();
   const hqLocation = 'new-orleans';
   const startCity = getCityById(hqLocation) ?? CITIES[0];
 
@@ -326,30 +346,32 @@ function handleLoadSample(ws: WebSocket): void {
     map: { [startCity.id]: prototypeActionsForCity(startCity) },
   };
 
-  liveState = sampleState;
-  pendingWeekResults = null;
-  persistState();
+  games.set(gameId, { state: sampleState, pending: null });
+  persistGame(gameId);
 
-  console.log('[sample] Sample state loaded');
-  send(ws, { type: 'STATE', payload: toClientGameState(liveState) });
+  console.log(`[sample] Sample game ${gameId} loaded`);
+  send(ws, { type: 'STATE', payload: { gameId, state: toClientGameState(sampleState) } });
 }
 
-function handleReset(ws: WebSocket): void {
-  liveState = null;
-  pendingWeekResults = null;
-  if (fs.existsSync(STATE_FILE)) {
-    fs.unlinkSync(STATE_FILE);
-    console.log('[reset] State file deleted');
+function handleReset(ws: WebSocket, gameId: string | undefined): void {
+  if (gameId) {
+    games.delete(gameId);
+    const fp = gameFilePath(gameId);
+    if (fs.existsSync(fp)) {
+      fs.unlinkSync(fp);
+      console.log(`[reset] Game ${gameId} deleted`);
+    }
   }
   send(ws, { type: 'RESET_OK' });
 }
 
 // ── Server bootstrap ───────────────────────────────────────────────────────
 
-loadPersistedState();
+loadAllGames();
 
 const wss = new WebSocketServer({ port: PORT });
 console.log(`[server] WebSocket server listening on ws://0.0.0.0:${PORT}`);
+console.log(`[server] Games directory: ${GAMES_DIR}`);
 
 wss.on('connection', (ws, req) => {
   const clientAddr = req.socket.remoteAddress;
@@ -364,12 +386,12 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
-    console.log('[ws] ←', message.type);
+    console.log('[ws] ←', message.type, message.payload?.gameId ? `(game ${message.payload.gameId.slice(0, 8)}…)` : '');
 
     try {
       switch (message.type) {
         case 'GET_STATE':
-          handleGetState(ws);
+          handleGetState(ws, message.payload?.gameId);
           break;
         case 'INIT_READING':
           await handleInitReading(ws, message.payload);
@@ -381,13 +403,13 @@ wss.on('connection', (ws, req) => {
           handleCompleteWeek(ws, message.payload);
           break;
         case 'ACCEPT_WEEK_RESULTS':
-          handleAcceptWeekResults(ws);
+          handleAcceptWeekResults(ws, message.payload?.gameId);
           break;
         case 'LOAD_SAMPLE':
           handleLoadSample(ws);
           break;
         case 'RESET':
-          handleReset(ws);
+          handleReset(ws, message.payload?.gameId);
           break;
         default:
           send(ws, { type: 'ERROR', payload: { message: `Unknown message type: ${message.type}` } });

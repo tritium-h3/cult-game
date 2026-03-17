@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n server,vite -c magenta,cyan \"tsx server/index.ts\" \"vite\"",
+    "dev": "concurrently -n server,vite -c magenta,cyan \"tsx watch server/index.ts\" \"vite\"",
     "dev:frontend": "vite",
-    "dev:server": "tsx server/index.ts",
+    "dev:server": "tsx watch server/index.ts",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
