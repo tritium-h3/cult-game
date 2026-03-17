@@ -13,6 +13,8 @@ interface HookCardProps {
   type: HookItemType;
   title: string;
   description?: string;
+  /** When provided, a discard button appears on hover. Call this to remove the card. */
+  onDiscard?: () => void;
 }
 
 /**
@@ -26,15 +28,25 @@ interface HookCardProps {
  *     <HookCard type="book" title="Necronomicon" description="A tome of forbidden lore." />
  *   </Card>
  */
-export function HookCard({ type, title, description }: HookCardProps) {
+export function HookCard({ type, title, description, onDiscard }: HookCardProps) {
   return (
     <div
-      className="ui-hook-card h-full w-full flex flex-col rounded overflow-hidden border"
+      className="ui-hook-card h-full w-full flex flex-col rounded overflow-hidden border group"
       data-type={type}
     >
       {/* Type badge */}
-      <div className="ui-hook-badge px-2 py-1 text-xs font-semibold rounded-t">
-        {HOOK_LABELS[type]}
+      <div className="ui-hook-badge px-2 py-1 text-xs font-semibold rounded-t flex items-center justify-between">
+        <span>{HOOK_LABELS[type]}</span>
+        {onDiscard && (
+          <button
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={onDiscard}
+            className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity w-4 h-4 flex items-center justify-center leading-none hover:text-white"
+            aria-label="Discard card"
+          >
+            ×
+          </button>
+        )}
       </div>
 
       {/* Body */}

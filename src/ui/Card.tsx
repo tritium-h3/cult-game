@@ -1,4 +1,4 @@
-import React, { type ReactNode, useEffect, useRef } from 'react';
+import React, { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useTable } from './context';
 import { useDrag } from './hooks/useDrag';
 
@@ -9,6 +9,8 @@ interface CardProps {
   locked?: boolean;
   children?: ReactNode;
   className?: string;
+  /** Stagger delay for the entrance (materialize) animation in ms. Default: 0. */
+  dealDelay?: number;
 }
 
 /**
@@ -24,7 +26,7 @@ interface CardProps {
  *   Cards (at rest):   z-20..49  (monotonically increasing; most-recently-moved wins)
  *   Card (dragging):   z-50  (applied by Table's mousemove handler)
  */
-export function Card({ id, locked = false, children, className = '' }: CardProps) {
+export function Card({ id, locked = false, children, className = '', dealDelay = 0 }: CardProps) {
   const { cards, drag, config, slotRegistry } = useTable();
 
   const card = cards[id];
@@ -33,6 +35,9 @@ export function Card({ id, locked = false, children, className = '' }: CardProps
   const { onMouseDown } = useDrag(id, effectiveLocked);
 
   const isDragging = drag?.cardId === id;
+
+  // Entrance animation — fires once on mount, cleared when the animation ends.
+  const [isEntering, setIsEntering] = useState(true);
 
   // Re-apply the correct committed position + transition after drag ends.
   // The table's mousemove strips the transition; we restore it here once the
@@ -68,6 +73,9 @@ export function Card({ id, locked = false, children, className = '' }: CardProps
       id={`card-${id}`}
       ref={elRef}
       onMouseDown={onMouseDown}
+      onAnimationEnd={(e) => {
+        if (e.animationName === 'card-materialize') setIsEntering(false);
+      }}
       style={{
         position: 'absolute',
         left: pxX,
@@ -78,9 +86,12 @@ export function Card({ id, locked = false, children, className = '' }: CardProps
         // Transition is applied/removed dynamically in the useEffect above.
         // On initial render show no transition (card appears in place).
         transition: 'none',
+        // Stagger: delay only while the entrance animation is active.
+        ...(isEntering && dealDelay > 0 ? { animationDelay: `${dealDelay}ms` } : {}),
       }}
       className={[
         locked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
+        isEntering ? 'card-entering' : '',
         className,
       ]
         .filter(Boolean)

@@ -628,11 +628,23 @@ export default function CultCardSelection() {
         </Sheet>
 
         {/* ── Cards: one column on the left, one spread visible at a time ── */}
-        {Object.keys(cards).map(cardId => (
-          <Card key={cardId} id={cardId} locked={!!cards[cardId]?.slotId}>
-            <DivinationCard cardId={cardId} />
-          </Card>
-        ))}
+        {Object.keys(cards).map(cardId => {
+          const cardData = cards[cardId];
+          // Stagger the deal-in for free (non-slotted) cards based on their
+          // position in the spread layout (top-left first, bottom-centre last).
+          let dealDelay = 0;
+          if (!cardData.slotId) {
+            const posIdx = SPREAD_CARD_GXS.findIndex(
+              (gx, i) => gx === cardData.gx && SPREAD_CARD_GYS[i] === cardData.gy
+            );
+            dealDelay = posIdx >= 0 ? posIdx * 60 : 0;
+          }
+          return (
+            <Card key={cardId} id={cardId} locked={!!cardData.slotId} dealDelay={dealDelay}>
+              <DivinationCard cardId={cardId} />
+            </Card>
+          );
+        })}
 
       </Table>
     </div>

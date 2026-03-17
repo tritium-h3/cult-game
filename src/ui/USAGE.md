@@ -168,9 +168,54 @@ interface CardData {
 }
 ```
 
+## `Card` Props
+
+| Prop | Type | Required | Description |
+|---|---|---|---|
+| `id` | `string` | Yes | Must match a key in `cards` |
+| `locked` | `boolean?` | No | Prevents the user from dragging the card |
+| `dealDelay` | `number?` | No | Entrance animation stagger delay in ms (default: 0) |
+| `className` | `string?` | No | Extra classes on the outer div |
+
 ---
 
-## Example Templates (non-normative)
+## Built-in Card Animations
+
+Both effects are automatic — no configuration required beyond the props below.
+
+### Entrance: materialize
+
+Every `<Card>` plays a materialize animation on mount: it appears from slightly above-left, over-bright and blurred, then swoops into position with a small overshoot before settling.
+
+Use `dealDelay` to stagger a set of cards being dealt at the same time:
+
+```tsx
+// Cascade 5 cards with 60ms between each
+{cardIds.map((id, i) => (
+  <Card key={id} id={id} dealDelay={i * 60}>
+    <MyCardFace />
+  </Card>
+))}
+```
+
+Cards are invisible (`opacity: 0`) during their delay, so they won't flash before animating in.
+
+### Exit: explosion
+
+When a card's id is removed from the `cards` prop, an amber particle burst plays at the card's last committed grid position. This requires no action from the consumer — just remove the entry:
+
+```tsx
+// This is all it takes — the Table fires the explosion automatically.
+setCards(prev => {
+  const { 'old-card': _, ...rest } = prev;
+  return rest;
+});
+```
+
+The explosion overlay is pointer-events-none and cleans itself up after the animation completes.
+
+---
+
 
 `src/ui/templates/HookCard.tsx` and `src/ui/templates/FollowerSheet.tsx` are example implementations showing a recommended visual pattern for the cult game. They are **not required** — any React children work inside `<Card>` and `<Sheet>`. Use them as reference or a starting point.
 
@@ -179,7 +224,13 @@ import { HookCard } from './ui/templates/HookCard';
 import { FollowerSheet } from './ui/templates/FollowerSheet';
 
 <Card id="book-1">
-  <HookCard type="book" title="Necronomicon" description="Forbidden lore." />
+  {/* onDiscard shows a hover × button; clicking it should remove the card from state */}
+  <HookCard
+    type="book"
+    title="Necronomicon"
+    description="Forbidden lore."
+    onDiscard={() => setCards(prev => { const { 'book-1': _, ...rest } = prev; return rest; })}
+  />
 </Card>
 
 <Sheet gx={7} gy={1} cols={4} rows={8}>

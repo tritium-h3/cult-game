@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Table, Card, Sheet, type CardData } from './ui';
-import { HookCard } from './ui/templates/HookCard';
+import { HookCard, type HookItemType } from './ui/templates/HookCard';
 import { FollowerSheet } from './ui/templates/FollowerSheet';
 
 // ---------------------------------------------------------------------------
@@ -9,13 +9,22 @@ import { FollowerSheet } from './ui/templates/FollowerSheet';
 // ---------------------------------------------------------------------------
 
 // Cards: two columns, three rows. Columns at gx=1 and gx=4 (3 apart = no overlap).
-const DEMO_INITIAL_CARDS: Record<string, CardData> = {
-  'site-1':     { gx: 1, gy: 0 },
-  'site-2':     { gx: 4, gy: 0 },
-  'book-1':     { gx: 1, gy: 4 },
-  'book-2':     { gx: 4, gy: 4 },
-  'artifact-1': { gx: 1, gy: 8 },
-  'patron-1':   { gx: 4, gy: 8 },
+// Type/title/description live here so discarded cards can be re-dealt from the same data.
+interface DemoCardDef {
+  type: HookItemType;
+  title: string;
+  description: string;
+  gx: number;
+  gy: number;
+}
+
+const DEMO_CARDS: Record<string, DemoCardDef> = {
+  'site-1':     { type: 'site',     gx: 1, gy: 0, title: 'The Sunken Library',  description: 'A flooded archive beneath the old docks. Locals say books still surface at low tide.' },
+  'site-2':     { type: 'site',     gx: 4, gy: 0, title: 'The Pale Cathedral',  description: 'Abandoned since the plague year. Strange light flickers from the bell tower at night.' },
+  'book-1':     { type: 'book',     gx: 1, gy: 4, title: 'Marginalia Obscura',  description: 'A compendium of annotations written in the margins of burned books, reassembled from memory.' },
+  'book-2':     { type: 'book',     gx: 4, gy: 4, title: "The Warden's Ledger", description: 'Records of the old asylum. Names, dates, and a cipher that repeats on every third page.' },
+  'artifact-1': { type: 'artifact', gx: 1, gy: 8, title: 'Hollow Coin',          description: 'Minted in no known nation. The face shifts depending on lighting conditions.' },
+  'patron-1':   { type: 'patron',   gx: 4, gy: 8, title: 'Sister Anneliese',     description: "Runs a legitimate charity. Knows more than she admits about the city's underground." },
 };
 
 // Elara sheet: gx=7, gy=2, 4 cols × 8 rows (320×640px)
@@ -33,8 +42,28 @@ const DORIAN_GX = 12;
 const DORIAN_GY = 2;
 
 export default function UIDemo() {
-  const [cards, setCards] = useState<Record<string, CardData>>(DEMO_INITIAL_CARDS);
+  // State is derived from DEMO_CARDS so cards can be re-dealt.
+  const [cards, setCards] = useState<Record<string, CardData>>(() =>
+    Object.fromEntries(Object.entries(DEMO_CARDS).map(([id, d]) => [id, { gx: d.gx, gy: d.gy }]))
+  );
   const [log, setLog] = useState<string[]>([]);
+
+  function removeCard(id: string) {
+    setCards(c => {
+      const { [id]: _, ...rest } = c;
+      return rest;
+    });
+    console.log(`[UIDemo] Discarded card "${id}"`);
+  }
+
+  function dealCard() {
+    const discarded = Object.keys(DEMO_CARDS).filter(id => !(id in cards));
+    if (discarded.length === 0) return;
+    const id = discarded[0];
+    const def = DEMO_CARDS[id];
+    console.log(`[UIDemo] Dealing card "${id}"`);
+    setCards(c => ({ ...c, [id]: { gx: def.gx, gy: def.gy } }));
+  }
 
   function handleSlotDrop(slotId: string, cardId: string) {
     const msg = `Card "${cardId}" placed in slot "${slotId}"`;
@@ -75,27 +104,19 @@ export default function UIDemo() {
           />
         </Sheet>
 
-        {/* ── Free cards — drag these onto the slots above ── */}
-        <Card id="site-1">
-          <HookCard type="site" title="The Sunken Library" description="A flooded archive beneath the old docks. Locals say books still surface at low tide." />
-        </Card>
-        <Card id="site-2">
-          <HookCard type="site" title="The Pale Cathedral" description="Abandoned since the plague year. Strange light flickers from the bell tower at night." />
-        </Card>
-
-        <Card id="book-1">
-          <HookCard type="book" title="Marginalia Obscura" description="A compendium of annotations written in the margins of burned books, reassembled from memory." />
-        </Card>
-        <Card id="book-2">
-          <HookCard type="book" title="The Warden's Ledger" description="Records of the old asylum. Names, dates, and a cipher that repeats on every third page." />
-        </Card>
-
-        <Card id="artifact-1">
-          <HookCard type="artifact" title="Hollow Coin" description="Minted in no known nation. The face shifts depending on lighting conditions." />
-        </Card>
-        <Card id="patron-1">
-          <HookCard type="patron" title="Sister Anneliese" description="Runs a legitimate charity. Knows more than she admits about the city's underground." />
-        </Card>
+        {/* ── Free cards — conditionally rendered so mounting = entrance animation, unmounting = explosion ── */}
+        {Object.entries(DEMO_CARDS).map(([id, def]) =>
+          id in cards ? (
+            <Card key={id} id={id}>
+              <HookCard
+                type={def.type}
+                title={def.title}
+                description={def.description}
+                onDiscard={() => removeCard(id)}
+              />
+            </Card>
+          ) : null
+        )}
       </Table>
 
       {/* ── Event log overlay ── */}
@@ -115,8 +136,17 @@ export default function UIDemo() {
       {/* ── Instructions overlay ── */}
       <div className="fixed top-4 left-4 z-[100] text-xs text-amber-500/50 pointer-events-none space-y-0.5">
         <div>Drag cards onto follower slots.</div>
+        <div>Hover a card and click <span className="text-amber-400/70">×</span> to discard it — watch it burst.</div>
         <div>Elara's third slot is locked — cards stay put.</div>
         <div>Two cards cannot share an origin cell.</div>
+        {Object.keys(DEMO_CARDS).some(id => !(id in cards)) && (
+          <button
+            onClick={dealCard}
+            className="pointer-events-auto mt-1.5 px-2 py-1 rounded border border-amber-600/30 text-amber-400/75 hover:text-amber-300 hover:border-amber-500/50 transition-colors"
+          >
+            Deal a card
+          </button>
+        )}
         <div className="mt-1 text-amber-600/40">
           <a href="/" className="pointer-events-auto underline">← Back</a>
         </div>
