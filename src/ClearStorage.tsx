@@ -1,17 +1,21 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useGameSocket } from './hooks/useGameSocket';
 
 export default function ClearStorage() {
   const [cleared, setCleared] = useState(false);
   const navigate = useNavigate();
+  const { send, subscribe } = useGameSocket();
 
   useEffect(() => {
-    // Clear localStorage
-    localStorage.removeItem('cultGameState');
-    localStorage.removeItem('cultGameActionMap');
-    console.log('Cleared localStorage: cultGameState, cultGameActionMap');
-    setCleared(true);
-  }, []);
+    const unsub = subscribe('RESET_OK', () => {
+      console.log('Server reset OK');
+      setCleared(true);
+      unsub();
+    });
+    send({ type: 'RESET' });
+    return unsub;
+  }, [send, subscribe]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 flex items-center justify-center p-8">

@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -n server,vite -c magenta,cyan \"tsx server/index.ts\" \"vite\"",
+    "dev:frontend": "vite",
+    "dev:server": "tsx server/index.ts",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -16,18 +18,22 @@
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.11.0",
     "tailwindcss": "^4.1.18",
-    "transliteration": "^2.6.0"
+    "transliteration": "^2.6.0",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@tailwindcss/vite": "^4.1.18",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.1",
+    "concurrently": "^9.2.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "tsx": "^4.21.0",
     "vite": "npm:rolldown-vite@7.2.5"
   },
   "overrides": {

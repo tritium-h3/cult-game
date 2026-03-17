@@ -3,9 +3,10 @@ import { Sparkles, User, Users, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import './Game.css';
 import { Table, Card, Sheet, Slot, type CardData } from './ui';
-import { CARD_SPREADS, generateInitialGameState, getNarrative, getGameState, generateCultName } from './game/reading';
-import type { Card as TarotCardType, GameState } from './game/types';
+import { CARD_SPREADS } from './game/reading';
+import type { Card as TarotCardType } from './game/types';
 import { getCityById, CITIES } from './game/world';
+import { useGameSocket } from './hooks/useGameSocket';
 
 // ── Grid layout constants (1 unit = 80px, default cardW=2 cardH=3 → 160×240px) ──
 const GRID = 80;
@@ -93,8 +94,8 @@ export default function CultCardSelection() {
   // ── Phase / narrative state ────────────────────────────────────────
   const [readingState, setNarrativeState] = useState<'selection' | 'naming' | 'narrating' | 'ready'>('selection');
   const [narrative, setNarrative] = useState<string>('');
-  const [gameState, setGameState] = useState<GameState>({} as GameState);
   const navigate = useNavigate();
+  const { send, subscribe } = useGameSocket();
 
   // ── Naming state ──────────────────────────────────────────────────
   const [cultName, setCultName] = useState('');
@@ -137,15 +138,18 @@ export default function CultCardSelection() {
     }
   }, [selectedCity, hasUserSetName]);
 
-  // Suggest cult name when naming screen opens
+  // Suggest cult name when naming screen opens (request from server)
   useEffect(() => {
     if (readingState === 'naming' && !hasUserSetCultName) {
       const mysteryId = selectedCards[2];
       const horizonId = selectedCards[3];
       if (mysteryId && horizonId) {
-        const suggestedCultName = generateCultName(mysteryId, horizonId);
-        console.log('Suggesting cult name:', suggestedCultName);
-        setCultName(suggestedCultName);
+        const unsub = subscribe('CULT_NAME', (name: string) => {
+          setCultName(name);
+          console.log('Received initial cult name from server:', name);
+          unsub();
+        });
+        send({ type: 'GENERATE_CULT_NAME', payload: { mysteryId, horizonId } });
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -157,7 +161,6 @@ export default function CultCardSelection() {
       setLockedCardIds({});
       setCards(getCardsForSpread(0));
       setNarrative('');
-      setGameState({} as GameState);
       setCultName('');
       setLeaderName('');
       setSelectedCity('');
@@ -165,11 +168,29 @@ export default function CultCardSelection() {
       setHasUserSetCultName(false);
   }
 
-  function addToNarrative(text: string) {
-    setNarrative((prev) => prev + text);
-  }
+  // Subscribe to server messages during the reading
+  useEffect(() => {
+    const unsubChunk = subscribe('NARRATIVE_CHUNK', (chunk: string) => {
+      setNarrative(prev => prev + chunk);
+    });
+    const unsubDone = subscribe('READING_DONE', () => {
+      console.log('Reading done, navigating to game');
+      setNarrativeState('ready');
+    });
+    const unsubError = subscribe('ERROR', (payload: { message: string }) => {
+      console.error('Server error during reading:', payload.message);
+      alert(`Error: ${payload.message}`);
+      reset();
+    });
+    return () => {
+      unsubChunk();
+      unsubDone();
+      unsubError();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subscribe]);
 
-  const generateNarrative = async () => {
+  const generateNarrative = () => {
     setNarrativeState('narrating');
     const selectedCardsData: TarotCardType[] = selectedCards.map((id, idx) => {
       const spread = CARD_SPREADS[idx];
@@ -178,34 +199,16 @@ export default function CultCardSelection() {
       return card;
     });
 
-    const gameStateTemplate = await generateInitialGameState(selectedCardsData, cultName.trim(), leaderName.trim(), selectedCity);
-    // Update template with user-provided names
-    gameStateTemplate.cultName = cultName.trim();
-    gameStateTemplate.leader.name = leaderName.trim();
-    
-    console.log('Generated game state template:', gameStateTemplate);
-    const narrativeText = await getNarrative(selectedCardsData, gameStateTemplate, addToNarrative, window.location.hostname);
-    const gameState = await getGameState(narrativeText || '', gameStateTemplate, window.location.hostname);
-    
-    if (gameState) {
-      // Ensure the names from form are preserved
-      gameState.cultName = cultName.trim();
-      gameState.leader.name = leaderName.trim();
-    }
-    
-    setGameState(gameState || {} as GameState);
-    if (narrativeText && gameState) {
-      try {
-        localStorage.setItem('cultGameState', JSON.stringify(gameState));
-        console.log('Game state saved to localStorage');
-        setNarrativeState('ready');
-      } catch (storageError) {
-        console.error('Failed to save to localStorage:', storageError);
-      }
-    } else {
-      alert('Failed to generate narrative or game state. Please try again.');
-      reset();
-    }
+    console.log('Sending INIT_READING to server');
+    send({
+      type: 'INIT_READING',
+      payload: {
+        selectedCards: selectedCardsData,
+        cultName: cultName.trim(),
+        leaderName: leaderName.trim(),
+        cityId: selectedCity || undefined,
+      },
+    });
   };
 
   const handleNameSubmit = (e: React.FormEvent) => {
@@ -318,10 +321,15 @@ export default function CultCardSelection() {
                     onClick={() => {
                       const mysteryId = selectedCards[2];
                       const horizonId = selectedCards[3];
-                      const newCultName = generateCultName(mysteryId, horizonId);
-                      setCultName(newCultName);
-                      setHasUserSetCultName(false);
-                      console.log('Generated new cult name:', newCultName);
+                      if (mysteryId && horizonId) {
+                        const unsub = subscribe('CULT_NAME', (name: string) => {
+                          setCultName(name);
+                          setHasUserSetCultName(false);
+                          console.log('Received cult name from server:', name);
+                          unsub();
+                        });
+                        send({ type: 'GENERATE_CULT_NAME', payload: { mysteryId, horizonId } });
+                      }
                     }}
                     className="px-4 py-3 bg-purple-800/50 hover:bg-purple-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors whitespace-nowrap"
                     title="Generate a new cult name suggestion"
@@ -415,13 +423,6 @@ export default function CultCardSelection() {
             <div className="prose prose-invert prose-amber max-w-none">
               <p className="text-lg leading-relaxed whitespace-pre-wrap">{narrative}</p>
             </div>
-          </div>
-
-          <div className="bg-black/40 border-2 border-purple-600/30 rounded-lg p-6 backdrop-blur mb-8">
-            <h2 className="text-xl font-serif text-purple-300 mb-4">Initial Game State</h2>
-            <pre className="text-xs text-amber-100/80 overflow-x-auto whitespace-pre-wrap">
-              {JSON.stringify(gameState, null, 2)}
-            </pre>
           </div>
 
           <div className="flex gap-4 justify-center">

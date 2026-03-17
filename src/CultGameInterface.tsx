@@ -2,9 +2,26 @@ import React, { useState, useEffect, DragEvent } from 'react';
 import { MapPin, User, Calendar } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import "./Game.css"
-import { completeWeek, saveGameState, prototypeActionsForCity, deserializeActionMap } from './game/actions';
-import { CITIES, getCityById } from './game/world';
-import { City, Follower, GameState, Outcome, Action } from './game/types';
+import { getCityById } from './game/world';
+import { City, Follower, GameState } from './game/types';
+import { useGameSocket } from './hooks/useGameSocket';
+
+/** Serialisable action shape received from the server (no function-bearing Outcome objects) */
+interface ClientAction {
+  id: string;
+  title: string;
+  description: string;
+  type?: string;
+}
+
+/** Week-results payload from the server */
+interface ClientWeekResults {
+  results: Record<string, { outcomeId: string; description: string }>;
+  updatedState: GameState;
+  assignments: Record<string, string>;
+  items: ClientAction[];
+  cityId: string;
+}
 
 export default function CultGameInterface() {
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -13,54 +30,39 @@ export default function CultGameInterface() {
   // assignments: { "${followerId}:${slotIndex}": itemId }
   const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [draggedItem, setDraggedItem] = useState<{ itemId: string; fromSlotKey: string | null } | null>(null);
-  const [weekResults, setWeekResults] = useState<{ results: Record<string, Outcome>; updatedState: GameState; assignments: Record<string, string>; items: Action[] } | null>(null);
+  const [weekResults, setWeekResults] = useState<ClientWeekResults | null>(null);
   const navigate = useNavigate();
+  const { send, subscribe } = useGameSocket();
 
   useEffect(() => {
-    // Load game state from localStorage
-    try {
-      const saved = localStorage.getItem('cultGameState');
-      if (saved) {
-        const state = JSON.parse(saved) as GameState;
-        console.log('Loading game state from localStorage');
-        console.log('state.hqLocation:', state.hqLocation);
-        // Load the serialized action map if it exists
-        const savedMap = localStorage.getItem('cultGameActionMap');
-        if (savedMap) {
-          try {
-            state.map = deserializeActionMap(savedMap);
-            console.log('Deserialized action map:', state.map);
-            console.log('Action map keys:', Object.keys(state.map));
-            
-            // Check if the map has actions for the HQ location, if not regenerate
-            const startCity = state.hqLocation ? getCityById(state.hqLocation) || CITIES[0] : CITIES[0];
-            if (!state.map[startCity.id] || state.map[startCity.id].length === 0) {
-              console.log('Map missing actions for HQ location, regenerating for:', startCity.id);
-              state.map[startCity.id] = prototypeActionsForCity(startCity);
-            }
-          } catch (e) {
-            console.error('Failed to deserialize action map, regenerating:', e);
-            const startCity = state.hqLocation ? getCityById(state.hqLocation) || CITIES[0] : CITIES[0];
-            state.map = { [startCity.id]: prototypeActionsForCity(startCity) };
-            console.log('Regenerated map for city:', startCity.id);
-          }
-        } else {
-          // No saved map, generate default
-          const startCity = state.hqLocation ? getCityById(state.hqLocation) || CITIES[0] : CITIES[0];
-          state.map = { [startCity.id]: prototypeActionsForCity(startCity) };
-          console.log('No saved map, generated default for city:', startCity.id);
-        }
-        console.log('Final state.map:', state.map);
-        setGameState(state);
-      } else {
-        // No saved game, redirect to home
-        navigate('/');
-      }
-    } catch (error) {
-      console.error('Failed to load game state:', error);
+    // Subscribe to incoming state and week-results messages
+    const unsubState = subscribe('STATE', (payload: GameState) => {
+      console.log('[game] Received STATE from server');
+      setGameState(payload);
+    });
+    const unsubNoState = subscribe('NO_STATE', () => {
+      console.log('[game] No state on server, redirecting to card selection');
       navigate('/');
-    }
-  }, [navigate]);
+    });
+    const unsubWeekResults = subscribe('WEEK_RESULTS', (payload: ClientWeekResults) => {
+      console.log('[game] Received WEEK_RESULTS from server');
+      setWeekResults(payload);
+      setView('report');
+    });
+    const unsubError = subscribe('ERROR', (payload: { message: string }) => {
+      console.error('[game] Server error:', payload.message);
+    });
+
+    // Request state from server
+    send({ type: 'GET_STATE' });
+
+    return () => {
+      unsubState();
+      unsubNoState();
+      unsubWeekResults();
+      unsubError();
+    };
+  }, [navigate, send, subscribe]);
 
   const handleItemDragStart = (e: DragEvent<HTMLDivElement>, itemId: string, fromSlotKey: string | null = null) => {
     setDraggedItem({ itemId, fromSlotKey });
@@ -191,12 +193,12 @@ export default function CultGameInterface() {
     console.log('=== LOCATION VIEW DEBUG ===');
     console.log('selectedLocation:', selectedLocation);
     console.log('gameState.map keys:', gameState.map ? Object.keys(gameState.map) : 'no map');
-    const items = gameState.map?.[selectedLocation?.id || ''] || [];
+    const items: ClientAction[] = (gameState.map as any)?.[selectedLocation?.id || ''] || [];
     console.log('items found:', items.length);
     console.log('=== END DEBUG ===');
 
     // Group items by hook type
-    const itemsByType: Record<string, Action[]> = { site: [], book: [], patron: [], artifact: [] };
+    const itemsByType: Record<string, ClientAction[]> = { site: [], book: [], patron: [], artifact: [] };
     items.forEach(item => itemsByType[item.type ?? 'site'].push(item));
 
     const typeConfig: Record<string, { label: string; headerClass: string; badgeClass: string; borderClass: string }> = {
@@ -358,9 +360,13 @@ export default function CultGameInterface() {
                     className="px-4 py-2 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors text-sm"
                     onClick={() => {
                       console.log('Completing week with assignments:', assignments);
-                      const { results, updatedState } = completeWeek(assignments, items, gameState);
-                      setWeekResults({ results, updatedState, assignments, items });
-                      setView('report');
+                      send({
+                        type: 'COMPLETE_WEEK',
+                        payload: {
+                          assignments,
+                          cityId: selectedLocation?.id ?? gameState.hqLocation,
+                        },
+                      });
                     }}
                   >
                     Complete Week's Work
@@ -377,7 +383,8 @@ export default function CultGameInterface() {
 
   // Report view
   if (view === 'report' && weekResults) {
-    const { results, updatedState, assignments: weekAssignments, items } = weekResults;
+    const { results, updatedState, assignments: weekAssignments, items, cityId } = weekResults;
+    const reportCity = getCityById(cityId);
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-6">
@@ -394,11 +401,11 @@ export default function CultGameInterface() {
             <h2 className="text-xl font-serif text-amber-300 mb-6">Events of the Week</h2>
             
             <div className="space-y-6">
-              {Object.entries(results).map(([slotKey, outcome]) => {
+              {Object.entries(results).map(([slotKey, result]) => {
                 const itemId = weekAssignments[slotKey];
                 const followerId = slotKey.split(':')[0];
                 const item = items.find(a => a.id === itemId);
-                const follower = gameState?.followers.find(f => f.id === followerId);
+                const follower = gameState?.followers.find((f: Follower) => f.id === followerId);
 
                 if (!item || !follower) return null;
 
@@ -406,7 +413,7 @@ export default function CultGameInterface() {
                   <div key={slotKey} className="border border-purple-500/30 rounded-lg p-6 bg-purple-900/10">
                     <div className="mb-3">
                       <h3 className="font-serif text-amber-300 text-lg">{item.title}</h3>
-                      <p className="text-sm text-amber-200/70 mt-1">{selectedLocation?.name}</p>
+                      <p className="text-sm text-amber-200/70 mt-1">{reportCity?.name}</p>
                     </div>
                     
                     <div className="mb-4 pl-4 border-l-2 border-amber-500/30">
@@ -417,7 +424,7 @@ export default function CultGameInterface() {
                     </div>
 
                     <div className="bg-black/30 rounded p-4">
-                      <p className="text-amber-100">{outcome.getDescription(follower)}</p>
+                      <p className="text-amber-100">{result.description}</p>
                     </div>
                   </div>
                 );
@@ -429,9 +436,9 @@ export default function CultGameInterface() {
               <button 
                 className="px-8 py-4 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors text-lg"
                 onClick={() => {
-                  // Enact outcomes and save (this mutates updatedState)
-                  saveGameState(weekAssignments, results, updatedState);
-                  // Set the mutated state in React
+                  // Tell server to apply outcomes and advance week
+                  send({ type: 'ACCEPT_WEEK_RESULTS' });
+                  // Optimistically update local state from what the server sent
                   setGameState({ ...updatedState });
                   setWeekResults(null);
                   setAssignments({});
