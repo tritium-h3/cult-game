@@ -248,6 +248,40 @@ import { FollowerSheet } from './ui/templates/FollowerSheet';
 
 ---
 
+## Layout Margin Convention
+
+Always keep **at least one grid cell of clearance** between any sheet or card and:
+- the viewport edge
+- another sheet
+- a free (non-slotted) card adjacent in another grid row/column
+
+This prevents content from bleeding to the screen edge and keeps the physical-table aesthetic readable.
+
+**Quick checklist for positioning:**
+
+| Element | Guideline |
+|---|---|
+| First card column | `gx ≥ 1` (1-cell left margin) |
+| Top card row | `gy ≥ 1` (1-cell top margin) |
+| Sheet near left/top edge | `gx ≥ 1`, `gy ≥ 1` |
+| Sheet below a card row | `sheet.gy ≥ card.gy + cardH + 1` |
+| Sheet right of a card column | `sheet.gx ≥ card.gx + cardW + 1` |
+| Cards inside a sheet | keep `≥ 1` cell from the sheet's own grid boundary |
+
+**Example — horizontal card row above a content sheet:**
+```tsx
+// 5 cards, 2-wide, 1-cell gaps, 1-cell edge margins:
+const ROW_GXS = [1, 4, 7, 10, 13]; // last card ends at gx=15
+const ROW_GY  = 1;                  // 1-cell top margin
+
+// Sheet directly below: gy = ROW_GY + cardH + 1 = 1 + 3 + 1 = 5
+<Sheet gx={1} gy={5} cols={14} rows={7}>
+  {/* … */}
+</Sheet>
+```
+
+---
+
 ## File Map
 
 ```

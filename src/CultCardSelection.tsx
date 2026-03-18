@@ -28,6 +28,36 @@ const SLOT_DXS = [0, 3, 6, 9, 12];
 // Slots start at dy=5, leaving 400px of text area above them
 const SLOT_DY = 5;
 
+// ── Post-selection layout (naming / narrating / ready) ───────────────────────
+// 1-cell margin rule: cards and sheets must always sit ≥1 grid cell from the
+// viewport edge and ≥1 grid cell from each other.
+//
+// Combined sheet: holds the card slot row (top 3 rows) and the naming/narrative
+// content area (bottom 7 rows) separated by a 1-row gap.
+//   gx=1 (1-cell left margin), gy=1 (1-cell top margin)
+//   14 cols wide, 11 rows tall (3 card slots + 1 gap + 7 content = 11)
+const COMBINED_SHEET_GX = 1;
+const COMBINED_SHEET_GY = 1;
+const COMBINED_SHEET_COLS = 14;
+const COMBINED_SHEET_ROWS = 11;
+// Slot dx offsets within the sheet (5 × 2-wide cards with 1-cell gaps)
+const TOP_SLOT_DXS = [0, 3, 6, 9, 12];
+const TOP_SLOT_DY = 0;
+// Content starts at dy=4 within the combined sheet (3 card rows + 1 gap row)
+const CONTENT_DY = 4;
+// Action cards + choice slot form a symmetric trio when the reading is done.
+// Sheet spans gx=1..15. Three 2-wide elements with 3-cell gaps:
+//   new-reading: gx=2..4 (1 cell from left edge)
+//   choice slot: gx=7..9 (centered)
+//   begin-game:  gx=12..14 (1 cell from right edge)
+// gy=8 is within the content area, leaving text above.
+const ACTION_NEW_GX = 2;
+const ACTION_BEGIN_GX = 12;
+const ACTION_CARD_GY = 8;
+// Choice slot position (dx/dy relative to COMBINED_SHEET)
+const CHOICE_SLOT_DX = 6; // absolute gx = 1+6 = 7
+const CHOICE_SLOT_DY = 7; // absolute gy = 1+7 = 8 — same row as action cards
+
 function getCardsForSpread(spreadIndex: number): Record<string, CardData> {
   const result: Record<string, CardData> = {};
   CARD_SPREADS[spreadIndex].cards.forEach((card, i) => {
@@ -36,6 +66,21 @@ function getCardsForSpread(spreadIndex: number): Record<string, CardData> {
       gy: SPREAD_CARD_GYS[i],
     };
   });
+  return result;
+}
+
+/** Build card positions locked into the top sheet's slots after selection completes. */
+function getRowCards(lockedIds: Record<number, string>): Record<string, CardData> {
+  const result: Record<string, CardData> = {};
+  for (const [idxStr, cardId] of Object.entries(lockedIds)) {
+    const idx = parseInt(idxStr);
+    const slotId = `row-slot-${idx}`;
+    result[`tarot-${idx}-${cardId}`] = {
+      gx: COMBINED_SHEET_GX + TOP_SLOT_DXS[idx],
+      gy: COMBINED_SHEET_GY + TOP_SLOT_DY,
+      slotId,
+    };
+  }
   return result;
 }
 
@@ -77,7 +122,67 @@ function DivinationCard({ cardId }: { cardId: string }) {
         className="px-2 py-1 text-center text-amber-700/40 text-xs shrink-0"
         style={{ borderTop: '1px solid rgba(217,119,6,0.1)' }}
       >
-        drag to scroll →
+        drag to slot →
+      </div>
+    </div>
+  );
+}
+
+// ── Action card face ─────────────────────────────────────────────────────────
+function ActionCardFace({
+  action,
+}: {
+  action: 'new-reading' | 'begin-game';
+}) {
+  const isBegin = action === 'begin-game';
+  return (
+    <div
+      className="h-full w-full flex flex-col rounded overflow-hidden select-none"
+      style={{
+        background: isBegin
+          ? 'linear-gradient(160deg, #2d1505 0%, #1a0d0d 100%)'
+          : 'linear-gradient(160deg, #0d1a2d 0%, #070d19 100%)',
+        border: `1px solid ${isBegin ? 'rgba(217,119,6,0.65)' : 'rgba(139,92,246,0.55)'}`,
+        cursor: 'grab',
+      }}
+    >
+      <div
+        className="px-2 py-1 text-center text-xs font-serif shrink-0"
+        style={{
+          borderBottom: `1px solid ${isBegin ? 'rgba(217,119,6,0.25)' : 'rgba(139,92,246,0.25)'}`,
+          background: isBegin ? 'rgba(120,53,15,0.35)' : 'rgba(76,29,149,0.35)',
+          color: isBegin ? 'rgba(251,191,36,0.75)' : 'rgba(196,181,253,0.75)',
+        }}
+      >
+        {isBegin ? 'The Path Opens' : 'The Stars Reset'}
+      </div>
+      <div className="flex-1 flex flex-col items-center justify-center px-3 py-4 gap-3">
+        <div
+          className="text-center font-serif font-bold leading-tight"
+          style={{
+            color: isBegin ? 'rgba(251,191,36,0.95)' : 'rgba(196,181,253,0.9)',
+            fontSize: '15px',
+          }}
+        >
+          {isBegin ? 'Begin Your Work' : 'Begin Another Reading'}
+        </div>
+        <div
+          className="text-center text-xs leading-snug"
+          style={{ color: isBegin ? 'rgba(254,243,199,0.6)' : 'rgba(233,213,255,0.55)' }}
+        >
+          {isBegin
+            ? 'The reading is complete. Step forward.'
+            : 'The cards may be read again.'}
+        </div>
+      </div>
+      <div
+        className="px-2 py-1 text-center text-xs shrink-0"
+        style={{
+          borderTop: `1px solid ${isBegin ? 'rgba(217,119,6,0.12)' : 'rgba(139,92,246,0.12)'}`,
+          color: isBegin ? 'rgba(217,119,6,0.55)' : 'rgba(139,92,246,0.55)',
+        }}
+      >
+        drag to decide
       </div>
     </div>
   );
@@ -181,6 +286,12 @@ export default function CultCardSelection() {
       pendingGameIdRef.current = gameId;
       setPendingGameId(gameId);
       setNarrativeState('ready');
+      // Deal two action cards onto the table
+      setCards(prev => ({
+        ...prev,
+        'action-new-reading': { gx: ACTION_NEW_GX, gy: ACTION_CARD_GY },
+        'action-begin-game': { gx: ACTION_BEGIN_GX, gy: ACTION_CARD_GY },
+      }));
     });
     const unsubError = subscribe('ERROR', (payload: { message: string }) => {
       console.error('Server error during reading:', payload.message);
@@ -227,6 +338,19 @@ export default function CultCardSelection() {
 
   // ── Slot drop handler ────────────────────────────────────────────────────
   const handleSlotDrop = useCallback((slotId: string, cardId: string) => {
+    // ── Action choice slot ──────────────────────────────────────────────
+    if (slotId === 'action-choice') {
+      console.log(`[CultCardSelection] Action choice slot received card: ${cardId}`);
+      if (cardId === 'action-new-reading') {
+        reset();
+      } else if (cardId === 'action-begin-game') {
+        const id = pendingGameIdRef.current;
+        console.log('Navigating to game, id:', id);
+        navigate(`/game/${id}`);
+      }
+      return;
+    }
+    // ── Spread selection slots ───────────────────────────────────────────
     const slotIdx = parseInt(slotId.replace('slot-', ''));
     if (slotIdx !== currentSpreadIndex) {
       console.log(`[CultCardSelection] Ignoring drop on slot-${slotIdx} (current: ${currentSpreadIndex})`);
@@ -266,197 +390,18 @@ export default function CultCardSelection() {
         next[cardId] = { gx: slotGx, gy: slotGy, slotId };
         return next;
       });
-      setTimeout(() => setNarrativeState('naming'), 300);
+      // Compute all locked card IDs including this final drop, then transition
+      const allLocked = { ...lockedCardIds, [slotIdx]: tarotCardName };
+      setTimeout(() => {
+        setNarrativeState('naming');
+        // Move all 5 locked cards into the horizontal top row (strips slotIds)
+        setCards(getRowCards(allLocked));
+      }, 300);
     }
-  }, [currentSpreadIndex]);
+  }, [currentSpreadIndex, lockedCardIds]);
 
-  // ── Naming screen ─────────────────────────────────────────────────────────
-  if (readingState === 'naming') {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-8">
-        <div className="max-w-2xl mx-auto">
-          <div className="text-center mb-12">
-            <Sparkles className="w-12 h-12 mx-auto mb-4 text-amber-400 animate-pulse" />
-            <h1 className="text-4xl font-serif mb-2">Name Your Destiny</h1>
-            <p className="text-amber-200/70">Every cult needs a name. Every leader needs an identity.</p>
-          </div>
-
-          <form onSubmit={handleNameSubmit} className="space-y-8">
-            <div className="bg-black/40 border-2 border-amber-600/30 rounded-lg p-8 backdrop-blur">
-              <div className="mb-6">
-                <label htmlFor="city" className="flex items-center gap-2 text-amber-300 mb-2">
-                  <MapPin className="w-5 h-5" />
-                  <span className="text-lg font-serif">The City</span>
-                </label>
-                <select
-                  id="city"
-                  value={selectedCity}
-                  onChange={(e) => setSelectedCity(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-900/50 border border-amber-600/30 rounded text-amber-100 focus:outline-none focus:border-amber-500/50 transition-colors"
-                >
-                  {CITIES.map(city => (
-                    <option key={city.id} value={city.id}>
-                      {city.name} — {city.flavor}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-amber-300/50 mt-2">Where will your journey begin?</p>
-              </div>
-
-              <div className="mb-6">
-                <label htmlFor="cult-name" className="flex items-center gap-2 text-amber-300 mb-2">
-                  <Users className="w-5 h-5" />
-                  <span className="text-lg font-serif">The Cult</span>
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    id="cult-name"
-                    type="text"
-                    value={cultName}
-                    onChange={(e) => {
-                      setCultName(e.target.value);
-                      setHasUserSetCultName(true);
-                    }}
-                    placeholder="The Order of the Veiled Truth..."
-                    className="flex-1 px-4 py-3 bg-slate-900/50 border border-amber-600/30 rounded text-amber-100 placeholder-amber-300/30 focus:outline-none focus:border-amber-500/50 transition-colors"
-                    maxLength={100}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const mysteryId = selectedCards[2];
-                      const horizonId = selectedCards[3];
-                      if (mysteryId && horizonId) {
-                        const unsub = subscribe('CULT_NAME', (name: string) => {
-                          setCultName(name);
-                          setHasUserSetCultName(false);
-                          console.log('Received cult name from server:', name);
-                          unsub();
-                        });
-                        send({ type: 'GENERATE_CULT_NAME', payload: { mysteryId, horizonId } });
-                      }
-                    }}
-                    className="px-4 py-3 bg-purple-800/50 hover:bg-purple-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors whitespace-nowrap"
-                    title="Generate a new cult name suggestion"
-                  >
-                    <Sparkles className="w-5 h-5" />
-                  </button>
-                </div>
-                <p className="text-xs text-amber-300/50 mt-2">What will they call your congregation?</p>
-              </div>
-
-              <div>
-                <label htmlFor="leader-name" className="flex items-center gap-2 text-amber-300 mb-2">
-                  <User className="w-5 h-5" />
-                  <span className="text-lg font-serif">The Leader</span>
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    id="leader-name"
-                    type="text"
-                    value={leaderName}
-                    onChange={(e) => {
-                      setLeaderName(e.target.value);
-                      setHasUserSetName(true);
-                    }}
-                    placeholder="Margot Ashford..."
-                    className="flex-1 px-4 py-3 bg-slate-900/50 border border-amber-600/30 rounded text-amber-100 placeholder-amber-300/30 focus:outline-none focus:border-amber-500/50 transition-colors"
-                    maxLength={100}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const city = getCityById(selectedCity);
-                      if (city) {
-                        const newName = city.faker.person.fullName();
-                        setLeaderName(newName);
-                        setHasUserSetName(false);
-                        console.log('Generated new suggested name:', newName);
-                      }
-                    }}
-                    className="px-4 py-3 bg-purple-800/50 hover:bg-purple-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors whitespace-nowrap"
-                    title="Generate a new name suggestion"
-                  >
-                    <Sparkles className="w-5 h-5" />
-                  </button>
-                </div>
-                <p className="text-xs text-amber-300/50 mt-2">What name shall you be known by?</p>
-              </div>
-            </div>
-
-            <div className="flex gap-4 justify-center">
-              <button
-                type="button"
-                onClick={reset}
-                className="px-6 py-3 bg-slate-800/50 hover:bg-slate-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
-              >
-                Return to Cards
-              </button>
-              <button
-                type="submit"
-                className="px-6 py-3 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors font-serif text-lg"
-              >
-                Reveal Your Path
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Narrating / Ready screen ──────────────────────────────────────────────
-  if (readingState === 'narrating' || readingState === 'ready') {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-8">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-8">
-            {readingState === 'narrating' ? (
-              <>
-                <Sparkles className="w-12 h-12 mx-auto mb-4 text-amber-400 animate-pulse" />
-                <h1 className="text-4xl font-serif mb-2">Your Path Is Being Revealed...</h1>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-12 h-12 mx-auto mb-4 text-amber-400" />
-                <h1 className="text-4xl font-serif mb-2">The Reading Is Complete</h1>
-              </>
-            )}
-          </div>
-``
-          <div className="bg-black/40 border-2 border-amber-600/30 rounded-lg p-8 backdrop-blur mb-8">
-            <div className="prose prose-invert prose-amber max-w-none">
-              <p className="text-lg leading-relaxed whitespace-pre-wrap">{narrative}</p>
-            </div>
-          </div>
-
-          <div className="flex gap-4 justify-center">
-            <button
-              onClick={reset}
-              className="px-6 py-3 bg-purple-800/50 hover:bg-purple-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
-            >
-              Begin Another Reading
-            </button>
-            <button
-              onClick={() => {
-                const id = pendingGameIdRef.current;
-                console.log('Navigating to game, id:', id);
-                navigate(`/game/${id}`);
-              }}
-              className="px-6 py-3 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors"
-              disabled={readingState !== 'ready'}
-            >
-              Begin Your Work
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Card selection screen (Table-based) ───────────────────────────────────
+  // Used only within the selection sheet
   const activeSpread = CARD_SPREADS[currentSpreadIndex];
-  // Compact summary of choices already locked in
   const lockedSummary = Object.entries(lockedCardIds)
     .sort(([a], [b]) => parseInt(a) - parseInt(b))
     .map(([idx, cardId]) => {
@@ -466,191 +411,493 @@ export default function CultCardSelection() {
     })
     .filter(Boolean);
 
+  // ── Single Table render — all phases ─────────────────────────────────────
   return (
     <div className="w-screen h-screen overflow-hidden">
-      {/* cardH: 2 makes each card 160×160px; 5 cards × 2 rows = 10 rows = 800px fills screen height */}
       <Table cards={cards} onCardsChange={setCards} onSlotDrop={handleSlotDrop}>
 
-        {/* ── Divination scroll: single sheet occupying the right ~87% of the screen ── */}
-        <Sheet gx={SHEET_GX} gy={SHEET_GY} cols={SHEET_COLS} rows={SHEET_ROWS}>
+        {/* ══════════════════════════════════════════════════════════════════
+            SELECTION PHASE — divination scroll sheet + free tarot cards
+        ══════════════════════════════════════════════════════════════════ */}
+        {readingState === 'selection' && (
+          <Sheet gx={SHEET_GX} gy={SHEET_GY} cols={SHEET_COLS} rows={SHEET_ROWS}>
 
-          {/* ── Decorative header ── */}
-          <div
-            style={{
-              position: 'absolute', top: 14, left: 0, right: 0,
-              textAlign: 'center', fontFamily: 'serif',
-              fontSize: '10px', letterSpacing: '0.18em', textTransform: 'uppercase',
-              color: 'rgba(217,119,6,0.35)', pointerEvents: 'none',
-            }}
-          >
-            The Divination
-          </div>
-
-          {/* Thin rule */}
-          <div style={{
-            position: 'absolute', top: 38, left: 24, right: 24,
-            height: 1, background: 'rgba(120,53,15,0.2)', pointerEvents: 'none',
-          }} />
-
-          {/* ── Active spread: title ── */}
-          <div
-            style={{
-              position: 'absolute', top: 56, left: 0, right: 0,
-              textAlign: 'center', fontFamily: 'serif',
-              fontSize: '26px', fontWeight: 'bold',
-              color: 'rgba(251,191,36,0.9)', pointerEvents: 'none',
-            }}
-          >
-            {activeSpread?.title ?? 'Complete'}
-          </div>
-
-          {/* ── Active spread: meaning subtitle ── */}
-          <div
-            style={{
-              position: 'absolute', top: 100, left: 0, right: 0,
-              textAlign: 'center',
-              fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase',
-              color: 'rgba(217,119,6,0.5)', pointerEvents: 'none',
-            }}
-          >
-            {activeSpread?.meaning}
-          </div>
-
-          {/* ── Active spread: prompt ── */}
-          <div
-            style={{
-              position: 'absolute', top: 148, left: 32, right: 32,
-              textAlign: 'center', fontFamily: 'serif',
-              fontSize: '17px', fontStyle: 'italic', lineHeight: 1.55,
-              color: 'rgba(254,243,199,0.7)', pointerEvents: 'none',
-            }}
-          >
-            {activeSpread?.prompt}
-          </div>
-
-          {/* ── Reset button (top-right corner of sheet) ── */}
-          <button
-            onClick={reset}
-            style={{
-              position: 'absolute', top: 14, right: 12,
-              fontSize: '11px', padding: '3px 10px',
-              background: 'rgba(15,10,5,0.5)',
-              border: '1px solid rgba(120,53,15,0.3)',
-              borderRadius: 4, color: 'rgba(217,119,6,0.5)',
-              cursor: 'pointer',
-            }}
-          >
-            Reset
-          </button>
-
-          {/* ── Column labels (just above slots) ── */}
-          {SLOT_DXS.map((dx, idx) => (
+            {/* Decorative header */}
             <div
-              key={`col-label-${idx}`}
               style={{
-                position: 'absolute',
-                left: dx * GRID + 4,
-                top: SLOT_DY * GRID - 30,
-                width: 2 * GRID - 8,
-                textAlign: 'center',
-                fontFamily: 'serif',
-                fontSize: '11px',
-                color:
-                  idx < currentSpreadIndex
-                    ? 'rgba(217,119,6,0.5)'
-                    : idx === currentSpreadIndex
-                    ? 'rgba(251,191,36,0.9)'
-                    : 'rgba(120,53,15,0.22)',
-                pointerEvents: 'none',
+                position: 'absolute', top: 14, left: 0, right: 0,
+                textAlign: 'center', fontFamily: 'serif',
+                fontSize: '10px', letterSpacing: '0.18em', textTransform: 'uppercase',
+                color: 'rgba(217,119,6,0.35)', pointerEvents: 'none',
               }}
             >
-              {CARD_SPREADS[idx].title}
+              The Divination
             </div>
-          ))}
 
-          {/* ── Slots: past (locked) + active; future steps not yet rendered ── */}
-          {SLOT_DXS.map((dx, idx) => {
-            if (idx > currentSpreadIndex) {
-              return null;
-            }
-            return (
+            {/* Thin rule */}
+            <div style={{
+              position: 'absolute', top: 38, left: 24, right: 24,
+              height: 1, background: 'rgba(120,53,15,0.2)', pointerEvents: 'none',
+            }} />
+
+            {/* Active spread: title */}
+            <div
+              style={{
+                position: 'absolute', top: 56, left: 0, right: 0,
+                textAlign: 'center', fontFamily: 'serif',
+                fontSize: '26px', fontWeight: 'bold',
+                color: 'rgba(251,191,36,0.9)', pointerEvents: 'none',
+              }}
+            >
+              {activeSpread?.title ?? 'Complete'}
+            </div>
+
+            {/* Active spread: meaning subtitle */}
+            <div
+              style={{
+                position: 'absolute', top: 100, left: 0, right: 0,
+                textAlign: 'center',
+                fontSize: '12px', letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: 'rgba(217,119,6,0.5)', pointerEvents: 'none',
+              }}
+            >
+              {activeSpread?.meaning}
+            </div>
+
+            {/* Active spread: prompt */}
+            <div
+              style={{
+                position: 'absolute', top: 148, left: 32, right: 32,
+                textAlign: 'center', fontFamily: 'serif',
+                fontSize: '17px', fontStyle: 'italic', lineHeight: 1.55,
+                color: 'rgba(254,243,199,0.7)', pointerEvents: 'none',
+              }}
+            >
+              {activeSpread?.prompt}
+            </div>
+
+            {/* Reset button */}
+            <button
+              onClick={reset}
+              style={{
+                position: 'absolute', top: 14, right: 12,
+                fontSize: '11px', padding: '3px 10px',
+                background: 'rgba(15,10,5,0.5)',
+                border: '1px solid rgba(120,53,15,0.3)',
+                borderRadius: 4, color: 'rgba(217,119,6,0.5)',
+                cursor: 'pointer',
+              }}
+            >
+              Reset
+            </button>
+
+            {/* Column labels (just above slots) */}
+            {SLOT_DXS.map((dx, idx) => (
+              <div
+                key={`col-label-${idx}`}
+                style={{
+                  position: 'absolute',
+                  left: dx * GRID + 4,
+                  top: SLOT_DY * GRID - 30,
+                  width: 2 * GRID - 8,
+                  textAlign: 'center',
+                  fontFamily: 'serif',
+                  fontSize: '11px',
+                  color:
+                    idx < currentSpreadIndex
+                      ? 'rgba(217,119,6,0.5)'
+                      : idx === currentSpreadIndex
+                      ? 'rgba(251,191,36,0.9)'
+                      : 'rgba(120,53,15,0.22)',
+                  pointerEvents: 'none',
+                }}
+              >
+                {CARD_SPREADS[idx].title}
+              </div>
+            ))}
+
+            {/* Slots: past (locked) + active; future steps not yet rendered */}
+            {SLOT_DXS.map((dx, idx) => {
+              if (idx > currentSpreadIndex) return null;
+              return (
+                <Slot
+                  key={`slot-${idx}`}
+                  id={`slot-${idx}`}
+                  dx={dx}
+                  dy={SLOT_DY}
+                  locked={idx < currentSpreadIndex}
+                  emptyLabel={CARD_SPREADS[idx].meaning}
+                  className={idx === currentSpreadIndex ? 'ui-slot-active' : ''}
+                />
+              );
+            })}
+
+            {/* Meaning labels (just below slots) */}
+            {SLOT_DXS.map((dx, idx) => (
+              <div
+                key={`meaning-${idx}`}
+                style={{
+                  position: 'absolute',
+                  left: dx * GRID + 4,
+                  top: (SLOT_DY + 3) * GRID + 10,
+                  width: 2 * GRID - 8,
+                  textAlign: 'center',
+                  fontSize: '10px',
+                  fontStyle: 'italic',
+                  lineHeight: 1.4,
+                  color:
+                    idx < currentSpreadIndex
+                      ? 'rgba(217,119,6,0.45)'
+                      : idx === currentSpreadIndex
+                      ? 'rgba(217,119,6,0.6)'
+                      : 'rgba(120,53,15,0.2)',
+                  pointerEvents: 'none',
+                }}
+              >
+                {CARD_SPREADS[idx].meaning}
+              </div>
+            ))}
+
+            {/* Locked selections summary (bottom of sheet) */}
+            {lockedSummary.length > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 18, left: 20, right: 20,
+                  display: 'flex', flexWrap: 'wrap',
+                  gap: '8px 16px', justifyContent: 'center',
+                  pointerEvents: 'none',
+                }}
+              >
+                {lockedSummary.map((s, i) => (
+                  <span key={i} style={{ fontSize: '11px', color: 'rgba(217,119,6,0.55)', fontStyle: 'italic' }}>
+                    {s}
+                  </span>
+                ))}
+              </div>
+            )}
+
+          </Sheet>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════
+            POST-SELECTION — combined sheet: card slot row + naming / narrative
+        ══════════════════════════════════════════════════════════════════ */}
+        {readingState !== 'selection' && (
+          <Sheet gx={COMBINED_SHEET_GX} gy={COMBINED_SHEET_GY} cols={COMBINED_SHEET_COLS} rows={COMBINED_SHEET_ROWS}>
+            {/* Spread title labels floating above each slot */}
+            {TOP_SLOT_DXS.map((dx, idx) => (
+              <div
+                key={`row-label-${idx}`}
+                style={{
+                  position: 'absolute',
+                  left: dx * GRID + 4,
+                  top: TOP_SLOT_DY * GRID - 26,
+                  width: 2 * GRID - 8,
+                  textAlign: 'center',
+                  fontFamily: 'serif',
+                  fontSize: '11px',
+                  color: 'rgba(217,119,6,0.55)',
+                  pointerEvents: 'none',
+                }}
+              >
+                {CARD_SPREADS[idx].title}
+              </div>
+            ))}
+            {/* Locked slots — selected cards snap here and cannot be removed */}
+            {TOP_SLOT_DXS.map((dx, idx) => (
               <Slot
-                key={`slot-${idx}`}
-                id={`slot-${idx}`}
+                key={`row-slot-${idx}`}
+                id={`row-slot-${idx}`}
                 dx={dx}
-                dy={SLOT_DY}
-                locked={idx < currentSpreadIndex}
-                emptyLabel={CARD_SPREADS[idx].meaning}
-                className={idx === currentSpreadIndex ? 'ui-slot-active' : ''}
+                dy={TOP_SLOT_DY}
+                locked
               />
-            );
-          })}
+            ))}
 
-          {/* ── Meaning labels (just below slots) ── */}
-          {SLOT_DXS.map((dx, idx) => (
-            <div
-              key={`meaning-${idx}`}
+            {/* Choice slot — appears when reading is complete; drag an action card here */}
+            {readingState === 'ready' && (
+              <Slot
+                id="action-choice"
+                dx={CHOICE_SLOT_DX}
+                dy={CHOICE_SLOT_DY}
+                emptyLabel="Drag your choice here"
+              />
+            )}
+
+            {/* ── NAMING PHASE ── */}
+            {readingState === 'naming' && (
+              <div style={{ position: 'absolute', top: CONTENT_DY * GRID, left: 0, right: 0, bottom: 0 }}>
+            <form
+              onSubmit={handleNameSubmit}
               style={{
-                position: 'absolute',
-                left: dx * GRID + 4,
-                top: (SLOT_DY + 3) * GRID + 10,
-                width: 2 * GRID - 8,
-                textAlign: 'center',
-                fontSize: '10px',
-                fontStyle: 'italic',
-                lineHeight: 1.4,
-                color:
-                  idx < currentSpreadIndex
-                    ? 'rgba(217,119,6,0.45)'
-                    : idx === currentSpreadIndex
-                    ? 'rgba(217,119,6,0.6)'
-                    : 'rgba(120,53,15,0.2)',
-                pointerEvents: 'none',
+                position: 'absolute', inset: 0,
+                padding: '18px 48px 18px 48px',
+                display: 'flex', flexDirection: 'column',
               }}
             >
-              {CARD_SPREADS[idx].meaning}
+              {/* Sheet header */}
+              <div style={{ textAlign: 'center', flexShrink: 0 }}>
+                <div style={{
+                  fontFamily: 'serif', fontSize: '10px', letterSpacing: '0.18em',
+                  textTransform: 'uppercase', color: 'rgba(217,119,6,0.35)',
+                }}>
+                  The Divination
+                </div>
+                <div style={{ height: 1, background: 'rgba(120,53,15,0.2)', margin: '6px -18px 10px' }} />
+                <div style={{
+                  fontFamily: 'serif', fontSize: '22px', fontWeight: 'bold',
+                  color: 'rgba(251,191,36,0.9)',
+                }}>
+                  Name Your Destiny
+                </div>
+                <div style={{ fontSize: '12px', color: 'rgba(217,119,6,0.5)', marginTop: '3px', marginBottom: '14px' }}>
+                  Every cult needs a name. Every leader needs an identity.
+                </div>
+              </div>
+
+              {/* Two-column fields */}
+              <div style={{ display: 'flex', gap: '36px', flex: 1, minHeight: 0 }}>
+
+                {/* Left: city + cult name */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'rgba(217,119,6,0.8)', fontFamily: 'serif', fontSize: '13px', marginBottom: '5px' }}>
+                      <MapPin size={13} /> The City
+                    </div>
+                    <select
+                      value={selectedCity}
+                      onChange={(e) => setSelectedCity(e.target.value)}
+                      style={{
+                        width: '100%', padding: '7px 11px', fontSize: '13px',
+                        background: 'rgba(10,6,20,0.75)', border: '1px solid rgba(217,119,6,0.3)',
+                        borderRadius: '4px', color: 'rgba(254,243,199,0.9)', outline: 'none',
+                      }}
+                    >
+                      {CITIES.map(city => (
+                        <option key={city.id} value={city.id} style={{ background: '#1e1030' }}>
+                          {city.name} — {city.flavor}
+                        </option>
+                      ))}
+                    </select>
+                    <div style={{ fontSize: '11px', color: 'rgba(217,119,6,0.4)', marginTop: '3px' }}>
+                      Where will your journey begin?
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'rgba(217,119,6,0.8)', fontFamily: 'serif', fontSize: '13px', marginBottom: '5px' }}>
+                      <Users size={13} /> The Cult
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <input
+                        type="text"
+                        value={cultName}
+                        onChange={(e) => { setCultName(e.target.value); setHasUserSetCultName(true); }}
+                        placeholder="The Order of the Veiled Truth..."
+                        maxLength={100}
+                        style={{
+                          flex: 1, padding: '7px 11px', fontSize: '13px',
+                          background: 'rgba(10,6,20,0.75)', border: '1px solid rgba(217,119,6,0.3)',
+                          borderRadius: '4px', color: 'rgba(254,243,199,0.9)', outline: 'none',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        title="Generate a new cult name"
+                        onClick={() => {
+                          const mysteryId = selectedCards[2];
+                          const horizonId = selectedCards[3];
+                          if (mysteryId && horizonId) {
+                            const unsub = subscribe('CULT_NAME', (name: string) => {
+                              setCultName(name); setHasUserSetCultName(false);
+                              console.log('Received cult name from server:', name);
+                              unsub();
+                            });
+                            send({ type: 'GENERATE_CULT_NAME', payload: { mysteryId, horizonId } });
+                          }
+                        }}
+                        style={{
+                          padding: '7px 10px', background: 'rgba(76,29,149,0.4)',
+                          border: '1px solid rgba(217,119,6,0.3)', borderRadius: '4px',
+                          color: 'rgba(196,181,253,0.85)', cursor: 'pointer', flexShrink: 0,
+                        }}
+                      >
+                        <Sparkles size={14} />
+                      </button>
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'rgba(217,119,6,0.4)', marginTop: '3px' }}>
+                      What will they call your congregation?
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right: leader name + action buttons */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'rgba(217,119,6,0.8)', fontFamily: 'serif', fontSize: '13px', marginBottom: '5px' }}>
+                      <User size={13} /> The Leader
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <input
+                        type="text"
+                        value={leaderName}
+                        onChange={(e) => { setLeaderName(e.target.value); setHasUserSetName(true); }}
+                        placeholder="Margot Ashford..."
+                        maxLength={100}
+                        style={{
+                          flex: 1, padding: '7px 11px', fontSize: '13px',
+                          background: 'rgba(10,6,20,0.75)', border: '1px solid rgba(217,119,6,0.3)',
+                          borderRadius: '4px', color: 'rgba(254,243,199,0.9)', outline: 'none',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        title="Generate a new name"
+                        onClick={() => {
+                          const city = getCityById(selectedCity);
+                          if (city) {
+                            const newName = city.faker.person.fullName();
+                            setLeaderName(newName); setHasUserSetName(false);
+                            console.log('Generated new suggested name:', newName);
+                          }
+                        }}
+                        style={{
+                          padding: '7px 10px', background: 'rgba(76,29,149,0.4)',
+                          border: '1px solid rgba(217,119,6,0.3)', borderRadius: '4px',
+                          color: 'rgba(196,181,253,0.85)', cursor: 'pointer', flexShrink: 0,
+                        }}
+                      >
+                        <Sparkles size={14} />
+                      </button>
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'rgba(217,119,6,0.4)', marginTop: '3px' }}>
+                      What name shall you be known by?
+                    </div>
+                  </div>
+
+                  <div style={{ flex: 1 }} />
+
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      onClick={reset}
+                      style={{
+                        padding: '8px 18px', fontSize: '13px',
+                        background: 'rgba(15,10,30,0.6)', border: '1px solid rgba(120,53,15,0.35)',
+                        borderRadius: '4px', color: 'rgba(217,119,6,0.7)', cursor: 'pointer',
+                      }}
+                    >
+                      Return to Cards
+                    </button>
+                    <button
+                      type="submit"
+                      style={{
+                        padding: '8px 22px', fontSize: '14px', fontFamily: 'serif', fontWeight: 'bold',
+                        background: 'rgba(120,53,15,0.35)', border: '1px solid rgba(217,119,6,0.5)',
+                        borderRadius: '4px', color: 'rgba(251,191,36,0.9)', cursor: 'pointer',
+                      }}
+                    >
+                      Reveal Your Path
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </form>
+              </div>
+            )}
+
+            {/* ── NARRATING / READY — narrative text; action cards deal in on completion ── */}
+            {(readingState === 'narrating' || readingState === 'ready') && (
+              <div style={{ position: 'absolute', top: CONTENT_DY * GRID, left: 0, right: 0, bottom: 0 }}>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', padding: '14px 32px' }}>
+
+              {/* Header */}
+              <div style={{ flexShrink: 0, textAlign: 'center', marginBottom: '10px' }}>
+                <div style={{
+                  fontFamily: 'serif', fontSize: '10px', letterSpacing: '0.18em',
+                  textTransform: 'uppercase', color: 'rgba(217,119,6,0.35)',
+                }}>
+                  The Divination
+                </div>
+                <div style={{ height: 1, background: 'rgba(120,53,15,0.2)', margin: '6px -12px' }} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginTop: '6px' }}>
+                  {readingState === 'narrating' && (
+                    <Sparkles size={15} className="text-amber-400 animate-pulse" />
+                  )}
+                  <div style={{
+                    fontFamily: 'serif', fontSize: '19px', fontWeight: 'bold',
+                    color: 'rgba(251,191,36,0.9)',
+                  }}>
+                    {readingState === 'narrating'
+                      ? 'Your Path Is Being Revealed...'
+                      : 'The Reading Is Complete'}
+                  </div>
+                  {readingState === 'narrating' && (
+                    <Sparkles size={15} className="text-amber-400 animate-pulse" />
+                  )}
+                </div>
+              </div>
+
+              {/* Scrollable narrative text */}
+              <div style={{ flex: 1, overflowY: 'auto', paddingRight: '6px' }}>
+                <p style={{
+                  fontFamily: 'serif', fontSize: '15px', lineHeight: 1.7,
+                  color: 'rgba(254,243,199,0.85)', whiteSpace: 'pre-wrap', margin: 0,
+                }}>
+                  {narrative}
+                  {readingState === 'narrating' && (
+                    <span style={{
+                      display: 'inline-block',
+                      borderRight: '2px solid rgba(251,191,36,0.7)',
+                      marginLeft: '2px', height: '0.9em',
+                      verticalAlign: 'text-bottom',
+                      animation: 'blink 1s step-end infinite',
+                    }} />
+                  )}
+                </p>
+              </div>
+
             </div>
-          ))}
+              </div>
+            )}
+          </Sheet>
+        )}
 
-          {/* ── Locked selections summary (bottom of sheet) ── */}
-          {lockedSummary.length > 0 && (
-            <div
-              style={{
-                position: 'absolute',
-                bottom: 18,
-                left: 20,
-                right: 20,
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: '8px 16px',
-                justifyContent: 'center',
-                pointerEvents: 'none',
-              }}
-            >
-              {lockedSummary.map((s, i) => (
-                <span key={i} style={{ fontSize: '11px', color: 'rgba(217,119,6,0.55)', fontStyle: 'italic' }}>
-                  {s}
-                </span>
-              ))}
-            </div>
-          )}
-
-        </Sheet>
-
-        {/* ── Cards: one column on the left, one spread visible at a time ── */}
+        {/* ══════════════════════════════════════════════════════════════════
+            CARDS — tarot cards (all phases) + action cards (ready phase)
+        ══════════════════════════════════════════════════════════════════ */}
         {Object.keys(cards).map(cardId => {
+          // Action card: Begin Another Reading
+          if (cardId === 'action-new-reading') {
+            return (
+              <Card key={cardId} id={cardId} dealDelay={0}>
+                <ActionCardFace action="new-reading" />
+              </Card>
+            );
+          }
+          // Action card: Begin Your Work
+          if (cardId === 'action-begin-game') {
+            return (
+              <Card key={cardId} id={cardId} dealDelay={200}>
+                <ActionCardFace action="begin-game" />
+              </Card>
+            );
+          }
+
+          // Tarot card
           const cardData = cards[cardId];
-          // Stagger the deal-in for free (non-slotted) cards based on their
-          // position in the spread layout (top-left first, bottom-centre last).
+          const isLockedCard = readingState !== 'selection' || !!cardData.slotId;
           let dealDelay = 0;
-          if (!cardData.slotId) {
+          if (!cardData.slotId && readingState === 'selection') {
             const posIdx = SPREAD_CARD_GXS.findIndex(
               (gx, i) => gx === cardData.gx && SPREAD_CARD_GYS[i] === cardData.gy
             );
             dealDelay = posIdx >= 0 ? posIdx * 60 : 0;
           }
           return (
-            <Card key={cardId} id={cardId} locked={!!cardData.slotId} dealDelay={dealDelay}>
+            <Card key={cardId} id={cardId} locked={isLockedCard} dealDelay={dealDelay}>
               <DivinationCard cardId={cardId} />
             </Card>
           );
