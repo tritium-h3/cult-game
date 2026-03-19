@@ -129,6 +129,15 @@
     animation: card-flash-out 260ms ease-out forwards;
   }
 
+  /* ── Table panning cursor ────────────────────────────────────────── */
+
+  /* Applied to #table-surface during a pan gesture. Forces grabbing cursor
+     on all children so card/slot cursors don't flicker through. */
+  .table-panning,
+  .table-panning * {
+    cursor: grabbing !important;
+  }
+
   /* ── Card entrance (materialize) ─────────────────────────────────── */
 
   @keyframes card-materialize {

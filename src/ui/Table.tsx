@@ -103,18 +103,37 @@ function TableInner({ children, onSlotDrop, exitingCards, onExitDone }: TableInn
   const { config, cards, drag, slotRegistry, setSlotCard, findCollision, commitDrag, revertDrag } = useTable();
 
   const tableRef = useRef<HTMLDivElement>(null);
+  const innerCanvasRef = useRef<HTMLDivElement>(null);
   const cursorPos = useRef({ x: 0, y: 0 });
+
+  // Pan state — all tracking via refs so mousemove never triggers re-renders.
+  const panOffsetRef = useRef({ x: 0, y: 0 });
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef({ mouseX: 0, mouseY: 0, panX: 0, panY: 0 });
+  // Only used for cursor styling; updates only at pan start/end.
+  const [isPanning, setIsPanning] = useState(false);
 
   const handleMouseMove = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
+      // Pan movement — translate the inner canvas directly, no re-render needed.
+      if (isPanningRef.current) {
+        const newX = panStartRef.current.panX + (e.clientX - panStartRef.current.mouseX);
+        const newY = panStartRef.current.panY + (e.clientY - panStartRef.current.mouseY);
+        panOffsetRef.current = { x: newX, y: newY };
+        if (innerCanvasRef.current) {
+          innerCanvasRef.current.style.transform = `translate(${newX}px, ${newY}px)`;
+        }
+        return;
+      }
+
       if (!drag) return;
 
       const tableRect = tableRef.current?.getBoundingClientRect();
       if (!tableRect) return;
 
-      // Position of the dragged card's top-left in table-local pixels.
-      const x = e.clientX - tableRect.left - drag.cursorOffsetX;
-      const y = e.clientY - tableRect.top - drag.cursorOffsetY;
+      // Position of the dragged card's top-left in inner canvas space (subtract pan offset).
+      const x = e.clientX - tableRect.left - drag.cursorOffsetX - panOffsetRef.current.x;
+      const y = e.clientY - tableRect.top - drag.cursorOffsetY - panOffsetRef.current.y;
 
       cursorPos.current = { x, y };
 
@@ -132,6 +151,14 @@ function TableInner({ children, onSlotDrop, exitingCards, onExitDone }: TableInn
 
   const handleMouseUp = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
+      // End pan on button release.
+      if (isPanningRef.current && e.button === 0) {
+        isPanningRef.current = false;
+        setIsPanning(false);
+        console.log('[Table] Pan end at', panOffsetRef.current);
+        return;
+      }
+
       if (!drag) return;
 
       const { cardId, startGx, startGy, cursorOffsetX, cursorOffsetY } = drag;
@@ -143,19 +170,17 @@ function TableInner({ children, onSlotDrop, exitingCards, onExitDone }: TableInn
 
       const { gridSize } = config;
 
-      // Raw pixel position of card top-left in table space.
-      const rawX = e.clientX - tableRect.left - cursorOffsetX;
-      const rawY = e.clientY - tableRect.top - cursorOffsetY;
+      // Raw pixel position of card top-left in inner canvas space (subtract pan offset).
+      const rawX = e.clientX - tableRect.left - cursorOffsetX - panOffsetRef.current.x;
+      const rawY = e.clientY - tableRect.top - cursorOffsetY - panOffsetRef.current.y;
 
       // Snap to nearest grid cell.
       const gx = Math.round(rawX / gridSize);
       const gy = Math.round(rawY / gridSize);
 
-      // Clamp to table bounds (keep card fully within viewport).
-      const tableW = Math.floor(tableRect.width / gridSize);
-      const tableH = Math.floor(tableRect.height / gridSize);
-      const clampedGx = Math.max(0, Math.min(gx, tableW - config.cardW));
-      const clampedGy = Math.max(0, Math.min(gy, tableH - config.cardH));
+      // Clamp to non-negative: cards may exist beyond the visible area when panned.
+      const clampedGx = Math.max(0, gx);
+      const clampedGy = Math.max(0, gy);
 
       // Collision check — is another card's origin at this exact cell?
       const collision = findCollision(clampedGx, clampedGy, cardId);
@@ -193,23 +218,49 @@ function TableInner({ children, onSlotDrop, exitingCards, onExitDone }: TableInn
     [drag, cards, config, commitDrag, revertDrag, slotRegistry, setSlotCard, findCollision, onSlotDrop]
   );
 
+  // Left-click on the table background (not on a card — cards call stopPropagation) starts panning.
+  const handleMouseDown = useCallback(
+    (e: MouseEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); // prevent text selection while panning
+      isPanningRef.current = true;
+      setIsPanning(true);
+      panStartRef.current = {
+        mouseX: e.clientX,
+        mouseY: e.clientY,
+        panX: panOffsetRef.current.x,
+        panY: panOffsetRef.current.y,
+      };
+      console.log('[Table] Pan start');
+    },
+    []
+  );
+
   return (
     <div
       ref={tableRef}
       id="table-surface"
-      className="relative w-screen h-screen overflow-hidden select-none bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900"
+      className={[
+        'relative w-screen h-screen overflow-hidden select-none bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900',
+        isPanning ? 'table-panning' : 'cursor-grab',
+      ].join(' ')}
+      onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      // Prevent the browser's default drag behaviour interfering.
       onDragStart={(e) => e.preventDefault()}
     >
-      {/* TODO: panning — attach pan handlers here, transform the inner surface */}
-      {children}
+      {/* Inner panning canvas — all content lives here and moves together via transform. */}
+      <div
+        ref={innerCanvasRef}
+        style={{ position: 'absolute', inset: 0, transform: 'translate(0px, 0px)' }}
+      >
+        {children}
 
-      {/* Card removal explosions — rendered at the card's last committed position */}
-      {Object.entries(exitingCards).map(([id, pos]) => (
-        <CardExplosion key={id} gx={pos.gx} gy={pos.gy} onDone={() => onExitDone(id)} />
-      ))}
+        {/* Card removal explosions — at the card's last committed grid position. */}
+        {Object.entries(exitingCards).map(([id, pos]) => (
+          <CardExplosion key={id} gx={pos.gx} gy={pos.gy} onDone={() => onExitDone(id)} />
+        ))}
+      </div>
     </div>
   );
 }

@@ -132,6 +132,17 @@ The `locked` prop can be toggled at runtime — if a slot is unlocked after a ca
 | `onSlotDrop` | `(slotId, cardId) => void` | No | Called when a card lands in a slot |
 | `config` | `Partial<TableConfig>` | No | Override grid/card size constants |
 
+---
+
+## Panning
+
+When the table content is wider or taller than the viewport, **click and drag on any empty table area** (background, sheets, or empty slots) to pan. Cards call `stopPropagation` on their own mousedown, so clicking a card will drag it rather than pan.
+
+- Cursor shows `grab` on empty space (pan is available).
+- Cursor shows `grabbing` while actively panning.
+- Cards can be dragged outside the original viewport bounds when panned — there is no position cap in the positive direction. Positions are only clamped to ≥ 0 (the top-left corner of the canvas cannot be panned off screen).
+- Pan offset is reset when the scene re-renders (e.g. week transition). If you need to preserve pan between renders, that is not currently supported.
+
 ## `Sheet` Props
 
 | Prop | Type | Description |

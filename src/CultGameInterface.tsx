@@ -1,9 +1,11 @@
-import React, { useState, useEffect, DragEvent } from 'react';
-import { MapPin, User, Calendar } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import "./Game.css"
+import { Table, Card, Sheet } from './ui';
+import type { CardData } from './ui/types';
+import { HookCard } from './ui/templates/HookCard';
+import { FollowerSheet } from './ui/templates/FollowerSheet';
 import { getCityById } from './game/world';
-import { City, Follower, GameState } from './game/types';
+import type { City, Follower, GameState, HookItemType } from './game/types';
 import { useGameSocket } from './hooks/useGameSocket';
 
 /** Serialisable action shape received from the server (no function-bearing Outcome objects) */
@@ -24,445 +26,384 @@ interface ClientWeekResults {
   cityId: string;
 }
 
+// ── Layout constants (1-cell margin rule throughout) ──────────────────────
+// All units are grid cells (1 cell = 80px).
+
+// Header sheet — single-row title bar shared across all views
+const HDR_GX = 1, HDR_GY = 1, HDR_COLS = 20, HDR_ROWS = 1;
+
+// Map view — cult info sheet (left) + city tiles (right)
+const MAP_CULT_GX = 1,  MAP_CULT_GY = 3, MAP_CULT_COLS = 4, MAP_CULT_ROWS = 6;
+// City tiles: 3×2 cells each, 4 per row, starting at gx=6
+const MAP_CITY_COLS = 3, MAP_CITY_ROWS = 2;
+const MAP_CITY_START_GX = 6, MAP_CITY_START_GY = 3;
+const MAP_CITY_PER_ROW = 4, MAP_CITY_COL_STEP = 4, MAP_CITY_ROW_STEP = 3;
+
+// Location view — hook card pool (left, 2 columns)
+// Cards are 2×3 cells. Layout: col at gx=1, col at gx=4 (card width 2 + gap 1)
+const HOOK_GXS      = [1, 4];
+const HOOK_START_GY = 3;    // below header (gy=2) + 1-cell margin
+const HOOK_ROW_STEP = 3;    // cardH (3), no gap
+
+// Location view — follower sheets (right, 1 per row stacked vertically)
+// Each sheet: 13 cols × 3 rows. Info section left (8 cols), slots on the right (dy=0).
+// Single column at gx=7; right edge at gx=20 (1-cell margin before table edge).
+const FOL_GX        = 7;    // 1-cell gap after last hook col (gx=4+2=6 → gx=7)
+const FOL_COLS      = 13;
+const FOL_ROWS      = 3;    // exact card height — info and slots share the same 3-row band
+const FOL_INFO_COLS = 8;    // grid cols allocated to name/background on the left
+const FOL_PER_ROW   = 1;    // one follower per horizontal row
+const FOL_COL_STEP  = FOL_COLS + 1;  // unused when PER_ROW=1, kept for symmetry
+const FOL_ROW_STEP  = FOL_ROWS + 1;  // 3 rows + 1 gap = 4
+
+// Report view — single large sheet
+const RPT_GX = 1, RPT_GY = 3, RPT_COLS = 20, RPT_ROWS = 8;
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+function followerGX(idx: number) { return FOL_GX + (idx % FOL_PER_ROW) * FOL_COL_STEP; }
+function followerGY(idx: number) { return HOOK_START_GY + Math.floor(idx / FOL_PER_ROW) * FOL_ROW_STEP; }
+function cityGX(idx: number) { return MAP_CITY_START_GX + (idx % MAP_CITY_PER_ROW) * MAP_CITY_COL_STEP; }
+function cityGY(idx: number) { return MAP_CITY_START_GY + Math.floor(idx / MAP_CITY_PER_ROW) * MAP_CITY_ROW_STEP; }
+
+/** Slot defs (dx/dy within sheet) for a follower's assignment slots. */
+function slotDefs(followerId: string, numSlots: number) {
+  // Slots sit to the right of the info section (FOL_INFO_COLS=8).
+  // 1 slot: centred in remaining 5-col space (dx=10, occupies cols 10–11).
+  // 2 slots: side-by-side (dx=9 and dx=11, occupying cols 9–10 and 11–12).
+  return Array.from({ length: numSlots }, (_, i) => ({
+    id: `${followerId}:${i}`,
+    dx: numSlots === 1 ? 10 : 9 + (i % 2) * 2,
+    dy: 0,
+  }));
+}
+
+/** Build initial card positions for hook items dealt into a location. */
+function buildHookCards(items: ClientAction[]): Record<string, CardData> {
+  const result: Record<string, CardData> = {};
+  items.forEach((item, i) => {
+    result[item.id] = {
+      gx: HOOK_GXS[i % HOOK_GXS.length],
+      gy: HOOK_START_GY + Math.floor(i / HOOK_GXS.length) * HOOK_ROW_STEP,
+    };
+  });
+  return result;
+}
+
+// ── Shared button styles ──────────────────────────────────────────────────
+const btnPrimary: React.CSSProperties = {
+  padding: '7px 20px', fontFamily: 'serif', fontSize: '13px', fontWeight: 'bold',
+  background: 'rgba(120,53,15,0.4)', border: '1px solid rgba(217,119,6,0.5)',
+  borderRadius: '4px', color: 'rgba(251,191,36,0.9)', cursor: 'pointer',
+};
+const btnSecondary: React.CSSProperties = {
+  padding: '6px 14px', fontSize: '12px',
+  background: 'rgba(15,10,30,0.5)', border: '1px solid rgba(120,53,15,0.35)',
+  borderRadius: '4px', color: 'rgba(217,119,6,0.7)', cursor: 'pointer',
+};
+
 export default function CultGameInterface() {
-  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [gameState, setGameState]               = useState<GameState | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<City | undefined>(undefined);
-  const [view, setView] = useState<'map' | 'location' | 'report'>('map');
-  // assignments: { "${followerId}:${slotIndex}": itemId }
-  const [assignments, setAssignments] = useState<Record<string, string>>({});
-  const [draggedItem, setDraggedItem] = useState<{ itemId: string; fromSlotKey: string | null } | null>(null);
-  const [weekResults, setWeekResults] = useState<ClientWeekResults | null>(null);
+  const [view, setView]                         = useState<'map' | 'location' | 'report'>('map');
+  const [cards, setCards]                       = useState<Record<string, CardData>>({});
+  const [weekResults, setWeekResults]           = useState<ClientWeekResults | null>(null);
   const navigate = useNavigate();
   const { gameId } = useParams<{ gameId: string }>();
   const { send, subscribe } = useGameSocket();
 
+  // ── WebSocket subscriptions ──────────────────────────────────────────
   useEffect(() => {
-    if (!gameId) {
-      navigate('/');
-      return;
-    }
-    // Subscribe to incoming state and week-results messages
+    if (!gameId) { navigate('/'); return; }
     const unsubState = subscribe('STATE', ({ state }: { gameId: string; state: GameState }) => {
       console.log('[game] Received STATE from server');
       setGameState(state);
     });
     const unsubNoState = subscribe('NO_STATE', () => {
-      console.log('[game] No state on server, redirecting to card selection');
+      console.log('[game] No state, redirecting to card selection');
       navigate('/');
     });
-    const unsubWeekResults = subscribe('WEEK_RESULTS', (payload: ClientWeekResults) => {
+    const unsubResults = subscribe('WEEK_RESULTS', (payload: ClientWeekResults) => {
       console.log('[game] Received WEEK_RESULTS from server');
       setWeekResults(payload);
+      setCards({});
       setView('report');
     });
     const unsubError = subscribe('ERROR', (payload: { message: string }) => {
       console.error('[game] Server error:', payload.message);
     });
-
     send({ type: 'GET_STATE', payload: { gameId } });
+    return () => { unsubState(); unsubNoState(); unsubResults(); unsubError(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameId]);
 
-    return () => {
-      unsubState();
-      unsubNoState();
-      unsubWeekResults();
-      unsubError();
-    };
-  }, [gameId, navigate, send, subscribe]);
+  // ── Derived state ────────────────────────────────────────────────────
+  /** Items available for assignment in the current location. */
+  const hookItems = useMemo((): ClientAction[] => {
+    if (!selectedLocation || !gameState?.map) return [];
+    return (gameState.map as Record<string, ClientAction[]>)[selectedLocation.id] ?? [];
+  }, [selectedLocation, gameState]);
 
-  const handleItemDragStart = (e: DragEvent<HTMLDivElement>, itemId: string, fromSlotKey: string | null = null) => {
-    setDraggedItem({ itemId, fromSlotKey });
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move';
+  /**
+   * Current assignments derived from card positions.
+   * Cards sitting in follower slots contribute { slotId → cardId }.
+   */
+  const assignments = useMemo((): Record<string, string> => {
+    const result: Record<string, string> = {};
+    for (const [cardId, data] of Object.entries(cards)) {
+      if (data.slotId) result[data.slotId] = cardId;
     }
-  };
+    return result;
+  }, [cards]);
 
-  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    if (e.dataTransfer) {
-      e.dataTransfer.dropEffect = 'move';
-    }
-  };
+  /** Ordered list of city IDs the cult knows about (HQ first). */
+  const knownCities = useMemo((): string[] => {
+    if (!gameState) return [];
+    const ids = new Set([gameState.hqLocation, ...Object.keys(gameState.map ?? {})]);
+    return Array.from(ids);
+  }, [gameState]);
 
-  const handleDropToSlot = (e: DragEvent<HTMLDivElement>, targetSlotKey: string) => {
-    e.preventDefault();
-    if (!draggedItem) return;
-    const { itemId, fromSlotKey } = draggedItem;
-    const newAssignments = { ...assignments };
-    // Clear source slot if re-dragging from a slot
-    if (fromSlotKey !== null) {
-      delete newAssignments[fromSlotKey];
-    }
-    // Displace any existing item in target (sends it back to unassigned pool)
-    delete newAssignments[targetSlotKey];
-    // Assign item to target slot
-    newAssignments[targetSlotKey] = itemId;
-    console.log('Drop to slot:', targetSlotKey, '← item:', itemId);
-    setAssignments(newAssignments);
-    setDraggedItem(null);
-  };
+  // ── Actions ──────────────────────────────────────────────────────────
+  const enterLocation = useCallback((city: City) => {
+    const items = (gameState?.map as Record<string, ClientAction[]>)?.[city.id] ?? [];
+    console.log('[game] Entering location:', city.id, '| hook items:', items.length);
+    setSelectedLocation(city);
+    setCards(buildHookCards(items));
+    setView('location');
+  }, [gameState]);
 
-  const handleRemoveFromSlot = (slotKey: string) => {
-    const newAssignments = { ...assignments };
-    delete newAssignments[slotKey];
-    console.log('Removed item from slot:', slotKey);
-    setAssignments(newAssignments);
-  };
+  const handleCompleteWeek = useCallback(() => {
+    if (!gameId || !gameState) return;
+    const cityId = selectedLocation?.id ?? gameState.hqLocation;
+    console.log('[game] Completing week | cityId:', cityId, '| assignments:', assignments);
+    send({ type: 'COMPLETE_WEEK', payload: { gameId, assignments, cityId } });
+  }, [gameId, gameState, assignments, selectedLocation, send]);
 
+  const handleBeginNewWeek = useCallback(() => {
+    if (!gameId || !weekResults) return;
+    send({ type: 'ACCEPT_WEEK_RESULTS', payload: { gameId } });
+    setGameState({ ...weekResults.updatedState });
+    setWeekResults(null);
+    setCards({});
+    setSelectedLocation(undefined);
+    setView('map');
+  }, [gameId, weekResults, send]);
+
+  // ── Loading state ─────────────────────────────────────────────────────
   if (!gameState) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 flex items-center justify-center">
-        <div className="text-amber-500/60 text-lg font-serif animate-pulse">Consulting the void…</div>
-      </div>
-    );
-  }
-
-  // Map view
-  if (view === 'map') {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-6">
-        {/* Header */}
-        <div className="max-w-7xl mx-auto mb-6">
-          <div className="flex justify-between items-center bg-black/30 border border-amber-600/20 rounded-lg p-4">
-            <div>
-              <h1 className="text-2xl font-serif text-amber-300">{gameState.leader.name}</h1>
-              <p className="text-sm text-amber-200/70">{gameState.leader.background}</p>
-            </div>
-            <div className="flex items-center gap-4 text-sm">
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4" />
-                <span>Week {gameState.week}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <User className="w-4 h-4" />
-                <span>{gameState.followers.length} Adherents</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Map View */}
-        <div className="max-w-7xl mx-auto">
-          <div className="bg-black/40 border border-amber-600/20 rounded-lg p-8">
-            <h2 className="text-xl font-serif text-amber-300 mb-6">Global Operations</h2>
-            
-            {/* Simple "map" - just shows locations with adherents */}
-            <div className="space-y-4">
-              <div 
-                className="bg-gradient-to-r from-purple-900/30 to-slate-900/30 border border-amber-500/30 rounded-lg p-6 cursor-pointer hover:border-amber-500/60 transition-colors"
-                onClick={() => { 
-                  const city = getCityById(gameState.hqLocation);
-                  console.log('Clicking to enter location');
-                  console.log('gameState.hqLocation:', gameState.hqLocation);
-                  console.log('city:', city);
-                  console.log('gameState.map:', gameState.map);
-                  setSelectedLocation(city); 
-                  setView('location'); 
-                }}
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <MapPin className="w-5 h-5 text-amber-400" />
-                      <h3 className="text-lg font-serif text-amber-300">{getCityById(gameState.hqLocation)?.name}</h3>
-                    </div>
-                    <p className="text-sm text-amber-200/60 mb-3">Your initial base of operations</p>
-                    
-                    {/* Show adherents at this location */}
-                    <div className="space-y-2">
-                      <p className="text-xs text-amber-300/70 uppercase tracking-wide">Adherents Present:</p>
-                      {gameState.followers.map((follower: Follower, idx) => (
-                        <div key={idx} className="flex items-center gap-2 text-sm">
-                          <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-                          <span className="text-amber-100">{follower.name}</span>
-                          <span className="text-amber-200/50 text-xs">- {follower.background}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  
-                  <button className="px-4 py-2 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-sm transition-colors">
-                    Enter Location
-                  </button>
-                </div>
-              </div>
-
-              {/* Placeholder for future locations */}
-              <div className="text-center py-8 border border-dashed border-amber-600/20 rounded-lg">
-                <p className="text-amber-200/40 text-sm">Other locations will appear as you expand your influence...</p>
-              </div>
-            </div>
-          </div>
+      <div style={{
+        position: 'fixed', inset: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'linear-gradient(135deg, #0f0a1e 0%, #1a0a2e 50%, #0f0a1e 100%)',
+      }}>
+        <div style={{ fontFamily: 'serif', fontSize: '18px', color: 'rgba(217,119,6,0.6)' }}
+          className="animate-pulse">
+          Consulting the void…
         </div>
       </div>
     );
   }
 
-  // Location view
-  if (view === 'location') {
-    console.log('=== LOCATION VIEW DEBUG ===');
-    console.log('selectedLocation:', selectedLocation);
-    console.log('gameState.map keys:', gameState.map ? Object.keys(gameState.map) : 'no map');
-    const items: ClientAction[] = (gameState.map as any)?.[selectedLocation?.id || ''] || [];
-    console.log('items found:', items.length);
-    console.log('=== END DEBUG ===');
+  const reportCity = weekResults ? getCityById(weekResults.cityId) : undefined;
 
-    // Group items by hook type
-    const itemsByType: Record<string, ClientAction[]> = { site: [], book: [], patron: [], artifact: [] };
-    items.forEach(item => itemsByType[item.type ?? 'site'].push(item));
+  return (
+    <Table cards={cards} onCardsChange={setCards}>
 
-    const typeConfig: Record<string, { label: string; headerClass: string; badgeClass: string; borderClass: string }> = {
-      site:     { label: 'Sites',     headerClass: 'text-amber-400',  badgeClass: 'bg-amber-800/40 text-amber-300',   borderClass: 'border-amber-500/40' },
-      book:     { label: 'Books',     headerClass: 'text-violet-400', badgeClass: 'bg-violet-800/40 text-violet-300', borderClass: 'border-violet-500/40' },
-      patron:   { label: 'Patrons',   headerClass: 'text-teal-400',   badgeClass: 'bg-teal-800/40 text-teal-300',     borderClass: 'border-teal-500/40' },
-      artifact: { label: 'Artifacts', headerClass: 'text-rose-400',   badgeClass: 'bg-rose-800/40 text-rose-300',     borderClass: 'border-rose-500/40' },
-    };
-
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-6">
-        {/* Header */}
-        <div className="max-w-7xl mx-auto mb-6">
-          <div className="flex justify-between items-center bg-black/30 border border-amber-600/20 rounded-lg p-4">
-            <div>
-              <button
-                onClick={() => setView('map')}
-                className="text-sm text-amber-400 hover:text-amber-300 mb-1"
-              >
-                ← Back to Map
+      {/* ════════════════════════════════════════════════════════════════
+          HEADER — persists across all views
+      ════════════════════════════════════════════════════════════════ */}
+      <Sheet gx={HDR_GX} gy={HDR_GY} cols={HDR_COLS} rows={HDR_ROWS}>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', padding: '0 28px', gap: '16px' }}>
+          {/* Left: back navigation or cult name */}
+          <div style={{ flex: 1 }}>
+            {view === 'location' && (
+              <button style={btnSecondary} onClick={() => { setCards({}); setView('map'); }}>
+                ← Map
               </button>
-              <h1 className="text-2xl font-serif text-amber-300">{selectedLocation?.name}</h1>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Calendar className="w-4 h-4" />
-              <span>Week {gameState.week}</span>
-            </div>
+            )}
+            {view !== 'location' && (
+              <div style={{ fontFamily: 'serif', fontSize: '15px', color: 'rgba(217,119,6,0.55)', letterSpacing: '0.08em' }}>
+                {gameState.cultName}
+              </div>
+            )}
+          </div>
+          {/* Center: context title */}
+          <div style={{ fontFamily: 'serif', fontSize: '20px', fontWeight: 'bold', color: 'rgba(251,191,36,0.9)', textAlign: 'center' }}>
+            {view === 'location' && selectedLocation?.name}
+            {view === 'map'      && gameState.leader.name}
+            {view === 'report'   && `Week ${gameState.week} — Results`}
+          </div>
+          {/* Right: week counter + primary action */}
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '16px' }}>
+            {view !== 'report' && (
+              <div style={{ fontSize: '12px', color: 'rgba(217,119,6,0.5)', display: 'flex', gap: '4px', alignItems: 'center' }}>
+                <span>Week</span>
+                <span style={{ fontFamily: 'serif', fontSize: '14px', color: 'rgba(251,191,36,0.8)' }}>{gameState.week}</span>
+              </div>
+            )}
+            {view === 'location' && (
+              <button style={btnPrimary} onClick={handleCompleteWeek}>
+                Complete Week's Work
+              </button>
+            )}
+            {view === 'report' && (
+              <button style={btnPrimary} onClick={handleBeginNewWeek}>
+                Begin New Week
+              </button>
+            )}
           </div>
         </div>
+      </Sheet>
 
-        {/* Board */}
-        <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-5 gap-4">
-
-            {/* Left: Known to You */}
-            <div className="col-span-2">
-              <div
-                className="bg-black/40 border border-amber-600/20 rounded-lg p-4 overflow-y-auto"
-                style={{ maxHeight: 'calc(100vh - 220px)' }}
-              >
-                <h2 className="text-sm font-serif text-amber-300 mb-4">Known to You</h2>
-                <div className="space-y-5">
-                  {(['site', 'book', 'patron', 'artifact'] as const).map(type => {
-                    const typeItems = itemsByType[type];
-                    if (typeItems.length === 0) return null;
-                    const cfg = typeConfig[type];
-                    return (
-                      <div key={type}>
-                        <p className={`text-xs font-semibold uppercase tracking-wider mb-2 ${cfg.headerClass}`}>
-                          {cfg.label}
-                        </p>
-                        <div className="space-y-2">
-                          {typeItems.map(item => {
-                            const isAssigned = Object.values(assignments).includes(item.id);
-                            return (
-                              <div
-                                key={item.id}
-                                draggable={!isAssigned}
-                                onDragStart={(e) => handleItemDragStart(e, item.id)}
-                                className={`border rounded p-2 transition-all text-xs ${cfg.borderClass} ${
-                                  isAssigned
-                                    ? 'bg-black/10 opacity-40 cursor-not-allowed'
-                                    : 'bg-purple-900/20 cursor-move hover:bg-purple-900/40'
-                                }`}
-                              >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="flex-1 min-w-0">
-                                    <p className="font-serif text-amber-200 text-sm leading-snug">{item.title}</p>
-                                    <p className="text-xs text-amber-200/50 mt-0.5 line-clamp-2">{item.description}</p>
-                                  </div>
-                                  <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${cfg.badgeClass}`}>{type}</span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
+      {/* ════════════════════════════════════════════════════════════════
+          MAP VIEW — cult status + city tiles
+      ════════════════════════════════════════════════════════════════ */}
+      {view === 'map' && (
+        <>
+          {/* Cult status */}
+          <Sheet gx={MAP_CULT_GX} gy={MAP_CULT_GY} cols={MAP_CULT_COLS} rows={MAP_CULT_ROWS}>
+            <div style={{ position: 'absolute', inset: 0, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '6px', overflow: 'hidden' }}>
+              <div style={{ fontFamily: 'serif', fontSize: '9px', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(217,119,6,0.4)' }}>
+                Cult Status
+              </div>
+              <div style={{ height: 1, background: 'rgba(120,53,15,0.25)', flexShrink: 0 }} />
+              <div style={{ fontFamily: 'serif', fontSize: '16px', fontWeight: 'bold', color: 'rgba(251,191,36,0.9)' }}>
+                {gameState.leader.name}
+              </div>
+              <div style={{ fontSize: '10px', color: 'rgba(168,162,158,0.8)', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' } as React.CSSProperties}>
+                {gameState.leader.background}
+              </div>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ fontSize: '11px', color: 'rgba(217,119,6,0.6)' }}>
+                  Week <span style={{ fontFamily: 'serif', color: 'rgba(251,191,36,0.85)' }}>{gameState.week}</span>
+                </div>
+                <div style={{ fontSize: '11px', color: 'rgba(217,119,6,0.6)' }}>
+                  {gameState.followers.length} Adherents
                 </div>
               </div>
-            </div>
-
-            {/* Right: Adherents */}
-            <div className="col-span-3">
-              <div className="bg-black/40 border border-amber-600/20 rounded-lg p-4">
-                <h2 className="text-sm font-serif text-amber-300 mb-4">Adherents</h2>
-                <div className="space-y-4 overflow-y-auto pr-2" style={{ maxHeight: 'calc(100vh - 340px)' }}>
-                  {gameState.followers.map(follower => {
-                    const numSlots = follower.slots ?? 1;
-                    return (
-                      <div key={follower.id} className="border border-purple-500/30 rounded-lg p-3 bg-purple-900/10">
-                        {/* Follower info */}
-                        <div className="mb-3">
-                          <p className="font-serif text-amber-300 text-sm">{follower.name}</p>
-                          <p className="text-xs text-amber-200/60 mt-0.5 line-clamp-1">{follower.background}</p>
-                          <div className="flex flex-wrap gap-1 mt-1.5">
-                            {Array.isArray(follower.skills) && follower.skills.map(skill => (
-                              <span key={skill} className="text-xs px-1.5 py-0.5 bg-amber-800/30 rounded text-amber-300">{skill}</span>
-                            ))}
-                          </div>
-                        </div>
-                        {/* Slots */}
-                        <div className={`grid gap-2 ${numSlots > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                          {Array.from({ length: numSlots }).map((_, slotIndex) => {
-                            const slotKey = `${follower.id}:${slotIndex}`;
-                            const assignedItemId = assignments[slotKey];
-                            const assignedItem = assignedItemId ? items.find(i => i.id === assignedItemId) : null;
-                            const slotCfg = assignedItem?.type ? typeConfig[assignedItem.type] : null;
-                            return (
-                              <div
-                                key={slotKey}
-                                onDragOver={handleDragOver}
-                                onDrop={(e) => handleDropToSlot(e, slotKey)}
-                                className={`border-2 border-dashed rounded p-2 min-h-14 transition-colors ${
-                                  assignedItem
-                                    ? 'border-amber-500/60 bg-amber-900/10'
-                                    : 'border-amber-500/20'
-                                }`}
-                              >
-                                {assignedItem ? (
-                                  <div
-                                    draggable
-                                    onDragStart={(e) => handleItemDragStart(e, assignedItem.id, slotKey)}
-                                    className="cursor-move hover:bg-amber-900/20 transition-colors rounded p-0.5 -m-0.5"
-                                  >
-                                    <div className="flex items-start justify-between gap-1">
-                                      <div className="flex-1 min-w-0">
-                                        <p className="text-xs font-serif text-amber-200 leading-snug">{assignedItem.title}</p>
-                                        {slotCfg && (
-                                          <span className={`text-xs px-1 py-0.5 rounded mt-0.5 inline-block ${slotCfg.badgeClass}`}>
-                                            {assignedItem.type}
-                                          </span>
-                                        )}
-                                      </div>
-                                      <button
-                                        onClick={() => handleRemoveFromSlot(slotKey)}
-                                        className="text-amber-400/70 hover:text-amber-300 flex-shrink-0 text-lg leading-none ml-1"
-                                      >×</button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center justify-center h-full">
-                                    <p className="text-xs text-amber-300/30">Drop hook here</p>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
+              <div style={{ borderTop: '1px solid rgba(120,53,15,0.2)', paddingTop: '6px', overflow: 'hidden' }}>
+                <div style={{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgba(217,119,6,0.4)', marginBottom: '4px' }}>
+                  Followers
                 </div>
-
-                {/* Complete Week Button */}
-                <div className="mt-4 text-center">
-                  <button
-                    className="px-4 py-2 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors text-sm"
-                    onClick={() => {
-                      console.log('Completing week with assignments:', assignments);
-                      if (!gameId) return;
-                      send({
-                        type: 'COMPLETE_WEEK',
-                        payload: {
-                          gameId,
-                          assignments,
-                          cityId: selectedLocation?.id ?? gameState.hqLocation,
-                        },
-                      });
-                    }}
-                  >
-                    Complete Week's Work
-                  </button>
-                </div>
+                {gameState.followers.map(f => (
+                  <div key={f.id} style={{ fontSize: '10px', color: 'rgba(253,230,138,0.8)', fontFamily: 'serif', lineHeight: 1.6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {f.name}
+                  </div>
+                ))}
               </div>
             </div>
+          </Sheet>
 
-          </div>
-        </div>
-      </div>
-    );
-  }
+          {/* City tiles */}
+          {knownCities.map((cityId, idx) => {
+            const city = getCityById(cityId);
+            const isHQ = cityId === gameState.hqLocation;
+            return (
+              <Sheet key={cityId} gx={cityGX(idx)} gy={cityGY(idx)} cols={MAP_CITY_COLS} rows={MAP_CITY_ROWS}>
+                <div
+                  style={{ position: 'absolute', inset: 0, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: '4px', cursor: 'pointer' }}
+                  onClick={() => city && enterLocation(city)}
+                >
+                  {isHQ && (
+                    <div style={{ fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(217,119,6,0.5)', flexShrink: 0 }}>
+                      Headquarters
+                    </div>
+                  )}
+                  <div style={{ fontFamily: 'serif', fontSize: '15px', fontWeight: 'bold', color: 'rgba(251,191,36,0.9)', lineHeight: 1.2 }}>
+                    {city?.name}
+                  </div>
+                  <div style={{ fontSize: '9px', color: 'rgba(168,162,158,0.6)', fontStyle: 'italic', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.3 } as React.CSSProperties}>
+                    {city?.flavor}
+                  </div>
+                  <div style={{ marginTop: 'auto', fontSize: '10px', color: 'rgba(217,119,6,0.45)' }}>
+                    Enter →
+                  </div>
+                </div>
+              </Sheet>
+            );
+          })}
+        </>
+      )}
 
-  // Report view
-  if (view === 'report' && weekResults) {
-    const { results, updatedState, assignments: weekAssignments, items, cityId } = weekResults;
-    const reportCity = getCityById(cityId);
+      {/* ════════════════════════════════════════════════════════════════
+          LOCATION VIEW — follower sheets with assignment slots
+      ════════════════════════════════════════════════════════════════ */}
+      {view === 'location' && gameState.followers.map((follower, idx) => (
+        <Sheet
+          key={follower.id}
+          gx={followerGX(idx)}
+          gy={followerGY(idx)}
+          cols={FOL_COLS}
+          rows={FOL_ROWS}
+        >
+          <FollowerSheet
+            name={follower.name}
+            background={follower.background}
+            skills={Array.isArray(follower.skills) ? follower.skills : []}
+            slots={slotDefs(follower.id, follower.slots ?? 1)}
+            infoCols={FOL_INFO_COLS}
+          />
+        </Sheet>
+      ))}
 
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-900 text-amber-100 p-6">
-        {/* Header */}
-        <div className="max-w-7xl mx-auto mb-6">
-          <div className="bg-black/30 border border-amber-600/20 rounded-lg p-4">
-            <h1 className="text-2xl font-serif text-amber-300 text-center">Week {gameState?.week} - Results</h1>
-          </div>
-        </div>
-
-        {/* Results */}
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-black/40 border border-amber-600/20 rounded-lg p-8">
-            <h2 className="text-xl font-serif text-amber-300 mb-6">Events of the Week</h2>
-            
-            <div className="space-y-6">
-              {Object.entries(results).map(([slotKey, result]) => {
-                const itemId = weekAssignments[slotKey];
+      {/* ════════════════════════════════════════════════════════════════
+          REPORT VIEW — week results sheet
+      ════════════════════════════════════════════════════════════════ */}
+      {view === 'report' && weekResults && (
+        <Sheet gx={RPT_GX} gy={RPT_GY} cols={RPT_COLS} rows={RPT_ROWS}>
+          <div style={{
+            position: 'absolute', inset: 0,
+            padding: '18px 32px', overflow: 'hidden',
+            display: 'flex', flexDirection: 'column', gap: '10px',
+          }}>
+            <div style={{ fontFamily: 'serif', fontSize: '10px', letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(217,119,6,0.4)', flexShrink: 0 }}>
+              Events of the Week
+            </div>
+            <div style={{ height: 1, background: 'rgba(120,53,15,0.25)', flexShrink: 0 }} />
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {Object.entries(weekResults.results).map(([slotKey, result]) => {
+                const itemId = weekResults.assignments[slotKey];
                 const followerId = slotKey.split(':')[0];
-                const item = items.find(a => a.id === itemId);
-                const follower = gameState?.followers.find((f: Follower) => f.id === followerId);
-
+                const item = weekResults.items.find(a => a.id === itemId);
+                const follower = gameState.followers.find((f: Follower) => f.id === followerId);
                 if (!item || !follower) return null;
-
                 return (
-                  <div key={slotKey} className="border border-purple-500/30 rounded-lg p-6 bg-purple-900/10">
-                    <div className="mb-3">
-                      <h3 className="font-serif text-amber-300 text-lg">{item.title}</h3>
-                      <p className="text-sm text-amber-200/70 mt-1">{reportCity?.name}</p>
+                  <div key={slotKey} style={{ borderLeft: '2px solid rgba(120,53,15,0.5)', paddingLeft: '14px' }}>
+                    <div style={{ fontFamily: 'serif', fontSize: '14px', color: 'rgba(253,230,138,0.9)', marginBottom: '2px' }}>
+                      {item.title}
                     </div>
-                    
-                    <div className="mb-4 pl-4 border-l-2 border-amber-500/30">
-                      <p className="text-amber-200">
-                        <span className="font-serif text-amber-300">{follower.name}</span>
-                        <span className="text-amber-200/60 text-sm ml-2">({follower.background})</span>
-                      </p>
+                    <div style={{ fontSize: '11px', color: 'rgba(217,119,6,0.55)', marginBottom: '6px' }}>
+                      {follower.name}{reportCity && ` · ${reportCity.name}`}
                     </div>
-
-                    <div className="bg-black/30 rounded p-4">
-                      <p className="text-amber-100">{result.description}</p>
+                    <div style={{ fontSize: '13px', color: 'rgba(254,243,199,0.8)', lineHeight: 1.65 }}>
+                      {result.description}
                     </div>
                   </div>
                 );
               })}
             </div>
-
-            {/* Continue Button */}
-            <div className="mt-8 text-center">
-              <button 
-                className="px-8 py-4 bg-amber-800/50 hover:bg-amber-700/50 border border-amber-600/30 rounded text-amber-100 transition-colors text-lg"
-                onClick={() => {
-                  // Tell server to apply outcomes and advance week
-                  if (gameId) send({ type: 'ACCEPT_WEEK_RESULTS', payload: { gameId } });
-                  // Optimistically update local state from what the server sent
-                  setGameState({ ...updatedState });
-                  setWeekResults(null);
-                  setAssignments({});
-                  setSelectedLocation(undefined);
-                  setView('map');
-                }}
-              >
-                Begin New Week
-              </button>
-            </div>
           </div>
-        </div>
-      </div>
-    );
-  }
+        </Sheet>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════
+          HOOK CARDS — dealt into the location view pool
+      ════════════════════════════════════════════════════════════════ */}
+      {view === 'location' && Object.keys(cards).map((cardId, idx) => {
+        const item = hookItems.find(i => i.id === cardId);
+        if (!item) return null;
+        return (
+          <Card key={cardId} id={cardId} dealDelay={idx * 60}>
+            <HookCard
+              type={(item.type as HookItemType) ?? 'site'}
+              title={item.title}
+              description={item.description}
+            />
+          </Card>
+        );
+      })}
+
+    </Table>
+  );
 }
