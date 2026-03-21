@@ -222,6 +222,10 @@ function TableInner({ children, onSlotDrop, exitingCards, onExitDone }: TableInn
   const handleMouseDown = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
       if (e.button !== 0) return;
+      // Don't intercept clicks on interactive elements — let them work normally.
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON' || tag === 'LABEL') return;
+      if ((e.target as HTMLElement).isContentEditable) return;
       e.preventDefault(); // prevent text selection while panning
       isPanningRef.current = true;
       setIsPanning(true);
