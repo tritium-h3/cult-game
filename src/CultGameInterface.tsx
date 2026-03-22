@@ -5,22 +5,14 @@ import type { CardData } from './ui/types';
 import { HookCard } from './ui/templates/HookCard';
 import { FollowerSheet } from './ui/templates/FollowerSheet';
 import { getCityById } from './game/world';
-import type { City, Follower, GameState, HookItemType } from './game/types';
+import type { City, Follower, ClientGameState, ClientAction, HookItemType } from './game/types';
 import { useGameSocket } from './hooks/useGameSocket';
-
-/** Serialisable action shape received from the server (no function-bearing Outcome objects) */
-interface ClientAction {
-  id: string;
-  title: string;
-  description: string;
-  type?: string;
-}
 
 /** Week-results payload from the server */
 interface ClientWeekResults {
   gameId: string;
   results: Record<string, { outcomeId: string; description: string }>;
-  updatedState: GameState;
+  updatedState: ClientGameState;
   assignments: Record<string, string>;
   items: ClientAction[];
   cityId: string;
@@ -103,7 +95,7 @@ const btnSecondary: React.CSSProperties = {
 };
 
 export default function CultGameInterface() {
-  const [gameState, setGameState]               = useState<GameState | null>(null);
+  const [gameState, setGameState]               = useState<ClientGameState | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<City | undefined>(undefined);
   const [view, setView]                         = useState<'map' | 'location' | 'report'>('map');
   const [cards, setCards]                       = useState<Record<string, CardData>>({});
@@ -115,7 +107,7 @@ export default function CultGameInterface() {
   // ── WebSocket subscriptions ──────────────────────────────────────────
   useEffect(() => {
     if (!gameId) { navigate('/'); return; }
-    const unsubState = subscribe('STATE', ({ state }: { gameId: string; state: GameState }) => {
+    const unsubState = subscribe('STATE', ({ state }: { gameId: string; state: ClientGameState }) => {
       console.log('[game] Received STATE from server');
       setGameState(state);
     });

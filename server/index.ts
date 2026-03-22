@@ -19,18 +19,17 @@ import { randomUUID } from 'crypto';
 import {
   completeWeek,
   enactCityActions,
-  serializeActionMap,
-  deserializeActionMap,
-  prototypeActionsForCity,
+  getAvailableActionsForCity,
 } from '../src/game/actions';
 import { getCityById, CITIES } from '../src/game/world';
+import { generateWorldState } from '../src/game/worldGen';
 import {
   generateInitialGameState,
   generateCultName,
   getNarrative,
   getGameState,
 } from '../src/game/reading';
-import type { GameState, Action, Outcome, Card, ActionMap } from '../src/game/types';
+import type { GameState, WorldState, Action, Outcome, Card, HookItemType } from '../src/game/types';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GAMES_DIR = path.join(__dirname, 'games');
@@ -69,9 +68,10 @@ interface ClientWeekResults {
 
 // ── Persistence types ──────────────────────────────────────────────────────
 
+/** What gets written to disk for each game (both are plain JSON-serialisable) */
 interface PersistedState {
-  gameStateWithoutMap: Omit<GameState, 'map'>;
-  actionMapJson: string;
+  worldState: WorldState;
+  gameState: GameState;
 }
 
 interface PendingWeekResults {
@@ -83,6 +83,7 @@ interface PendingWeekResults {
 }
 
 interface GameEntry {
+  world: WorldState;
   state: GameState;
   pending: PendingWeekResults | null;
 }
@@ -101,9 +102,19 @@ function loadAllGames(): void {
     const gameId = path.basename(file, '.json');
     try {
       const raw = fs.readFileSync(path.join(GAMES_DIR, file), 'utf-8');
-      const persisted: PersistedState = JSON.parse(raw);
-      const map: ActionMap = deserializeActionMap(persisted.actionMapJson);
-      games.set(gameId, { state: { ...persisted.gameStateWithoutMap, map }, pending: null });
+      const persisted = JSON.parse(raw);
+
+      // Skip games saved in the old format (pre-WorldState architecture)
+      if (!persisted.worldState || !persisted.gameState) {
+        console.log(`[state] Skipping old-format game ${gameId}`);
+        continue;
+      }
+
+      games.set(gameId, {
+        world: persisted.worldState as WorldState,
+        state: persisted.gameState as GameState,
+        pending: null,
+      });
       console.log(`[state] Loaded game ${gameId}`);
     } catch (e) {
       console.error(`[state] Failed to load game ${gameId}:`, e);
@@ -116,9 +127,8 @@ function persistGame(gameId: string): void {
   const entry = games.get(gameId);
   if (!entry) return;
   try {
-    const { map, ...gameStateWithoutMap } = entry.state;
-    const actionMapJson = map ? serializeActionMap(map) : '{}';
-    fs.writeFileSync(gameFilePath(gameId), JSON.stringify({ gameStateWithoutMap, actionMapJson }, null, 2));
+    const persisted: PersistedState = { worldState: entry.world, gameState: entry.state };
+    fs.writeFileSync(gameFilePath(gameId), JSON.stringify(persisted, null, 2));
     console.log(`[state] Saved game ${gameId}`);
   } catch (e) {
     console.error(`[state] Failed to persist game ${gameId}:`, e);
@@ -133,17 +143,18 @@ function send(ws: WebSocket, message: object): void {
   }
 }
 
-function toClientGameState(state: GameState): ClientGameState {
-  const clientMap: Record<string, ClientAction[]> | undefined = state.map
-    ? Object.fromEntries(
-        Object.entries(state.map).map(([cityId, actions]) => [
-          cityId,
-          actions.map(a => ({ id: a.id, title: a.title, description: a.description, type: a.type })),
-        ])
-      )
-    : undefined;
-  const { map: _map, ...rest } = state;
-  return { ...rest, map: clientMap };
+function toClientGameState(state: GameState, world: WorldState): ClientGameState {
+  const clientMap: Record<string, ClientAction[]> = {};
+  for (const cityId of world.cities) {
+    const cityActions = getAvailableActionsForCity(cityId, world, state);
+    clientMap[cityId] = cityActions.map(a => ({
+      id: a.id,
+      title: a.title,
+      description: a.description,
+      type: a.type,
+    }));
+  }
+  return { ...state, map: clientMap };
 }
 
 // ── Message handlers ───────────────────────────────────────────────────────
@@ -157,9 +168,18 @@ function handleGetState(ws: WebSocket, gameId: string | undefined): void {
   if (!entry) {
     send(ws, { type: 'NO_STATE' });
   } else {
-    send(ws, { type: 'STATE', payload: { gameId, state: toClientGameState(entry.state) } });
+    send(ws, { type: 'STATE', payload: { gameId, state: toClientGameState(entry.state, entry.world) } });
   }
 }
+
+// Which item type to pre-discover based on the gateway (discovery) card
+const GATEWAY_TO_ITEM_TYPE: Record<string, HookItemType> = {
+  'inheritance': 'book',
+  'accident':    'site',
+  'bargain':     'patron',
+  'dream':       'artifact',
+  'theft':       'artifact',
+};
 
 async function handleInitReading(
   ws: WebSocket,
@@ -170,36 +190,69 @@ async function handleInitReading(
 
   console.log(`[reading] New game ${gameId}: INIT_READING for ${cultName} / ${leaderName}`);
 
-  const gameStateTemplate = await generateInitialGameState(selectedCards, cultName, leaderName, cityId);
-  gameStateTemplate.cultName = cultName;
-  gameStateTemplate.leader.name = leaderName;
+  // ── Step 1: Procedural mechanical generation ───────────────────────────
+  const gameState = await generateInitialGameState(selectedCards, cultName, leaderName, cityId);
+  gameState.cultName = cultName;
+  gameState.leader.name = leaderName;
 
+  // ── Step 2: World generation ───────────────────────────────────────────
+  const worldState = generateWorldState(gameState.hqLocation);
+
+  // ── Step 3: Seed starting discoveries based on gateway card ───────────
+  const gatewayId = selectedCards[1]?.id ?? 'inheritance';
+  const initialType = GATEWAY_TO_ITEM_TYPE[gatewayId] ?? 'book';
+  const hqItems = worldState.items[gameState.hqLocation] ?? [];
+
+  const initialDiscovered: string[] = [];
+  const matchingItem = hqItems.find(item => item.type === initialType);
+  if (matchingItem) initialDiscovered.push(matchingItem.id);
+
+  // Add a second item from a different type
+  const otherItem = hqItems.find(item => item.type !== initialType && !initialDiscovered.includes(item.id));
+  if (otherItem) initialDiscovered.push(otherItem.id);
+
+  if (initialDiscovered.length > 0) {
+    gameState.discoveredItems[gameState.hqLocation] = initialDiscovered;
+    console.log(`[reading] Pre-discovered items: ${initialDiscovered.join(', ')}`);
+  }
+
+  // ── Step 4: LLM narrative (flavor only — mechanics are already complete) ─
   let narrativeText = '';
   const addToNarrative = (chunk: string) => {
     narrativeText += chunk;
     send(ws, { type: 'NARRATIVE_CHUNK', payload: chunk });
   };
 
-  const fullNarrative = await getNarrative(selectedCards, gameStateTemplate, addToNarrative, OLLAMA_HOST);
+  const fullNarrative = await getNarrative(selectedCards, gameState, addToNarrative, OLLAMA_HOST);
   send(ws, { type: 'NARRATIVE_COMPLETE' });
   console.log(`[reading] Narrative complete for game ${gameId}`);
 
-  const extractedState = await getGameState(fullNarrative ?? '', gameStateTemplate, OLLAMA_HOST);
-  if (!extractedState) {
-    send(ws, { type: 'ERROR', payload: { message: 'Failed to extract game state from narrative.' } });
-    return;
+  // ── Step 5: LLM fills in flavor text fields only ───────────────────────
+  const flavorState = await getGameState(fullNarrative ?? '', gameState, OLLAMA_HOST);
+  if (flavorState) {
+    // Cherry-pick only flavor/narrative text — never mechanical fields
+    gameState.leader.background = flavorState.leader.background || gameState.leader.background;
+    gameState.leader.traits     = flavorState.leader.traits     || gameState.leader.traits;
+    gameState.discovery.artifact.description = flavorState.discovery?.artifact?.description || gameState.discovery.artifact.description;
+    gameState.discovery.details              = flavorState.discovery?.details              || gameState.discovery.details;
+    gameState.mystery.knownRituals           = flavorState.mystery?.knownRituals           || gameState.mystery.knownRituals;
+    gameState.mystery.paradigm               = flavorState.mystery?.paradigm               || gameState.mystery.paradigm;
+    gameState.goal.description               = flavorState.goal?.description               || gameState.goal.description;
+    for (let i = 0; i < gameState.followers.length; i++) {
+      if (flavorState.followers?.[i]?.background) {
+        gameState.followers[i].background = flavorState.followers[i].background;
+      }
+    }
+    console.log(`[reading] Flavor fields applied for game ${gameId}`);
+  } else {
+    console.warn(`[reading] LLM flavor extraction failed for game ${gameId} — using procedural defaults`);
   }
 
-  extractedState.cultName = cultName;
-  extractedState.leader.name = leaderName;
-
-  const startCity = getCityById(extractedState.hqLocation) ?? CITIES[0];
-  extractedState.map = { [startCity.id]: prototypeActionsForCity(startCity) };
-
-  games.set(gameId, { state: extractedState, pending: null });
+  // ── Step 6: Persist ───────────────────────────────────────────────────
+  games.set(gameId, { world: worldState, state: gameState, pending: null });
   persistGame(gameId);
 
-  send(ws, { type: 'READING_DONE', payload: { gameId, state: toClientGameState(extractedState) } });
+  send(ws, { type: 'READING_DONE', payload: { gameId, state: toClientGameState(gameState, worldState) } });
   console.log(`[reading] Game ${gameId} saved`);
 }
 
@@ -222,7 +275,7 @@ function handleCompleteWeek(
     return;
   }
 
-  const items = entry.state.map?.[cityId] ?? [];
+  const items = getAvailableActionsForCity(cityId, entry.world, entry.state);
   console.log(`[week] Game ${gameId}: completing week ${entry.state.week} with ${Object.keys(assignments).length} assignments`);
 
   const { results, updatedState } = completeWeek(assignments, items, entry.state);
@@ -242,7 +295,7 @@ function handleCompleteWeek(
   const clientPayload: ClientWeekResults = {
     gameId,
     results: clientResults,
-    updatedState: toClientGameState(updatedState),
+    updatedState: toClientGameState(updatedState, entry.world),
     assignments,
     items: items.map(a => ({ id: a.id, title: a.title, description: a.description, type: a.type })),
     cityId,
@@ -269,22 +322,14 @@ function handleAcceptWeekResults(ws: WebSocket, gameId: string | undefined): voi
   entry.state = updatedState;
   entry.pending = null;
 
-  if (entry.state.map) {
-    const city = getCityById(cityId);
-    if (city && (!entry.state.map[city.id] || entry.state.map[city.id].length === 0)) {
-      entry.state.map[city.id] = prototypeActionsForCity(city);
-    }
-  }
-
   persistGame(gameId);
   console.log(`[week] Game ${gameId}: results enacted, now week ${entry.state.week}`);
-  send(ws, { type: 'STATE', payload: { gameId, state: toClientGameState(entry.state) } });
+  send(ws, { type: 'STATE', payload: { gameId, state: toClientGameState(entry.state, entry.world) } });
 }
 
 function handleLoadSample(ws: WebSocket): void {
   const gameId = randomUUID();
   const hqLocation = 'new-orleans';
-  const startCity = getCityById(hqLocation) ?? CITIES[0];
 
   const sampleState: GameState = {
     cultName: 'The Obsidian Circle',
@@ -343,14 +388,26 @@ function handleLoadSample(ws: WebSocket): void {
     ],
     hqLocation,
     week: 1,
-    map: { [startCity.id]: prototypeActionsForCity(startCity) },
+    discoveredItems: {},
   };
 
-  games.set(gameId, { state: sampleState, pending: null });
+  // Generate world and seed starting discoveries for sample game
+  const worldState = generateWorldState(hqLocation);
+  const hqItems = worldState.items[hqLocation] ?? [];
+  // Pre-discover first book and first patron so there are hook cards immediately
+  const startingDiscovered = [
+    hqItems.find(i => i.type === 'book')?.id,
+    hqItems.find(i => i.type === 'patron')?.id,
+  ].filter(Boolean) as string[];
+  if (startingDiscovered.length > 0) {
+    sampleState.discoveredItems[hqLocation] = startingDiscovered;
+  }
+
+  games.set(gameId, { world: worldState, state: sampleState, pending: null });
   persistGame(gameId);
 
   console.log(`[sample] Sample game ${gameId} loaded`);
-  send(ws, { type: 'STATE', payload: { gameId, state: toClientGameState(sampleState) } });
+  send(ws, { type: 'STATE', payload: { gameId, state: toClientGameState(sampleState, worldState) } });
 }
 
 function handleReset(ws: WebSocket, gameId: string | undefined): void {

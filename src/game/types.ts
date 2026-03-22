@@ -45,6 +45,33 @@ export interface Goal {
 export type SkillClass = "social" | "intellectual" | "physical" | "practical";
 export type HookItemType = 'site' | 'book' | 'patron' | 'artifact';
 
+// ── World types (immutable, generated once per run) ────────────────────────
+
+/** A single effect that fires when a follower uses a discovered WorldItem */
+export type ItemEffect =
+    | { type: 'GainSkill'; skill: string; description: string }
+    | { type: 'GainTrait'; trait: string; description: string }
+    | { type: 'AddFollower'; skills: string[]; description: string }
+    | { type: 'DiscoverItem'; itemId: string; cityId: string; description: string }
+    | { type: 'NoEffect' };
+
+/** A pre-generated discoverable thing that exists in the world */
+export interface WorldItem {
+    id: string;           // e.g. "prague-book-0"
+    cityId: string;
+    type: HookItemType;
+    name: string;         // Faker-generated
+    flavorDescription: string;  // LLM-generated, empty until populated
+    discoveredBy: string; // action id that reveals this (e.g. 'research-at-libraries')
+    effects: ItemEffect[];
+}
+
+/** The immutable world — generated once at game start */
+export interface WorldState {
+    cities: string[];                        // active city IDs for this run
+    items: Record<string, WorldItem[]>;      // cityId -> WorldItem[]
+}
+
 export interface Skill {
   id: string;
   type: SkillClass;
@@ -79,7 +106,8 @@ export interface GameState {
   followers: Follower[];
   hqLocation: string;
   week: number;
-  map?: ActionMap;
+  /** cityId → [worldItemId, ...] — what the cult has discovered so far */
+  discoveredItems: Record<string, string[]>;
 }
 
 export interface Action {
@@ -98,3 +126,18 @@ export interface Outcome {
 }
 
 export type ActionMap = Record<string, Action[]>;
+
+/** Client-safe action (no function-bearing Outcome objects).
+ *  Matches what the server sends in map values and WEEK_RESULTS. */
+export interface ClientAction {
+  id: string;
+  title: string;
+  description: string;
+  type?: HookItemType;
+}
+
+/** GameState as delivered to the client: includes a derived action map.
+ *  The map is never stored — it is built by the server on every response. */
+export type ClientGameState = GameState & {
+  map?: Record<string, ClientAction[]>;
+};

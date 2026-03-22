@@ -2,6 +2,21 @@ import { CITIES } from "./world";
 import { Card, GameState, Spread } from "./types";
 import { generateLeader, generateFollowers } from "./followers";
 
+// ── Procedural artifact name generation ───────────────────────────────────
+
+const GATEWAY_ARTIFACT_NAMES: Record<string, string[]> = {
+  'inheritance': ['The Tarnished Codex', 'The Binding Testament', 'The Obsidian Mirror'],
+  'accident':   ['The Hollow Urn', 'The Cracked Lens', 'The Sealed Compartment'],
+  'bargain':    ['A Carved Idol', 'The Bound Compact', 'The Gilded Coin'],
+  'dream':      ['The Waking Fragment', 'The Night Codex', 'The Whispering Vessel'],
+  'theft':      ['The Stolen Icon', 'The Corroded Ring', 'The Painted Box'],
+};
+
+function generateArtifactName(gatewayId: string): string {
+  const options = GATEWAY_ARTIFACT_NAMES[gatewayId] ?? ['The Hidden Object'];
+  return options[Math.floor(Math.random() * options.length)];
+}
+
 interface Narrative {
   narrative: string;
   gameState: GameState;
@@ -141,7 +156,7 @@ export async function generateInitialGameState(selectedCards: Card[], cultName: 
     discovery: {
       type: selectedCards[1].id,
       artifact: {
-        name: "[ARTIFACT_NAME]",
+        name: generateArtifactName(selectedCards[1].id),
         description: "[ARTIFACT_DESC]"
       },
       details: "[DISCOVERY_DETAILS]"
@@ -157,7 +172,8 @@ export async function generateInitialGameState(selectedCards: Card[], cultName: 
     },
     followers: followers,
     hqLocation: startingCity,
-    week: 1
+    week: 1,
+    discoveredItems: {},  // server seeds initial items after world generation
   };
 
   return gameStateTemplate;
