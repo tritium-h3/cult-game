@@ -1,6 +1,6 @@
 // actions.ts
 import { Outcome, Follower, GameState, City, Action, WorldState, WorldItem, ItemEffect } from "./types";
-import { getCityById } from "./world";
+import { getCityById, CITY_VENUES } from "./world";
 
 // ============================================================================
 // HELPERS
@@ -168,113 +168,129 @@ function makeExploreEnact(cityId: string, actionId: string, worldState: WorldSta
 }
 
 const actions = {
-    attendCulturalEvents: (city: City, worldState: WorldState): Action => ({
-        id: "attend-cultural-events",
-        type: 'site',
-        title: "Attend Cultural Events",
-        description: `Explore ${city.name}'s cultural scene — galleries, performances, and gatherings.`,
-        outcomes: [
-            {
-                id: 'attend-discover',
-                odds: (f, gs) => {
-                    const n = countUndiscovered(city.id, 'attend-cultural-events', worldState, gs);
-                    if (n === 0) return 0;
-                    return hasSkill(f, 'networking') || hasSkill(f, 'artistic') ? 4 : 2;
+    attendCulturalEvents: (city: City, worldState: WorldState): Action => {
+        const v = CITY_VENUES[city.id];
+        const venue = v?.culturalVenue ?? `${city.name}'s cultural venues`;
+        return {
+            id: "attend-cultural-events",
+            type: 'site',
+            title: `Attend Events at ${venue}`,
+            description: `Mingle with performers, collectors, and seekers at ${venue}.`,
+            outcomes: [
+                {
+                    id: 'attend-discover',
+                    odds: (f, gs) => {
+                        const n = countUndiscovered(city.id, 'attend-cultural-events', worldState, gs);
+                        if (n === 0) return 0;
+                        return hasSkill(f, 'networking') || hasSkill(f, 'artistic') ? 4 : 2;
+                    },
+                    enact: makeExploreEnact(city.id, 'attend-cultural-events', worldState),
+                    getDescription: () => 'You uncover something of interest at the event.',
                 },
-                enact: makeExploreEnact(city.id, 'attend-cultural-events', worldState),
-                getDescription: () => 'You uncover something of interest at the event.',
-            },
-            {
-                ...outcomes.gainSkill("networking", "Mingling in the cultural scene develops your networking skills."),
-                odds: (f) => hasSkill(f, 'networking') ? 0 : 1,
-            },
-            {
-                ...outcomes.noOutcome(),
-                odds: () => 1,
-            },
-        ],
-    }),
+                {
+                    ...outcomes.gainSkill("networking", "Mingling here develops your networking skills."),
+                    odds: (f) => hasSkill(f, 'networking') ? 0 : 1,
+                },
+                {
+                    ...outcomes.noOutcome(),
+                    odds: () => 1,
+                },
+            ],
+        };
+    },
 
-    researchAtLibraries: (city: City, worldState: WorldState): Action => ({
-        id: "research-at-libraries",
-        type: 'book',
-        title: "Research at Libraries",
-        description: `Search ${city.name}'s archives and university collections for occult knowledge.`,
-        outcomes: [
-            {
-                id: 'research-discover',
-                odds: (f, gs) => {
-                    const n = countUndiscovered(city.id, 'research-at-libraries', worldState, gs);
-                    if (n === 0) return 0;
-                    return hasSkill(f, 'research') ? 4 : 2;
+    researchAtLibraries: (city: City, worldState: WorldState): Action => {
+        const v = CITY_VENUES[city.id];
+        const venue = v?.library ?? `${city.name}'s archives`;
+        return {
+            id: "research-at-libraries",
+            type: 'book',
+            title: `Research at ${venue}`,
+            description: `Search the restricted stacks and back catalogues of ${venue} for occult material.`,
+            outcomes: [
+                {
+                    id: 'research-discover',
+                    odds: (f, gs) => {
+                        const n = countUndiscovered(city.id, 'research-at-libraries', worldState, gs);
+                        if (n === 0) return 0;
+                        return hasSkill(f, 'research') ? 4 : 2;
+                    },
+                    enact: makeExploreEnact(city.id, 'research-at-libraries', worldState),
+                    getDescription: () => 'Your search turns up a promising lead.',
                 },
-                enact: makeExploreEnact(city.id, 'research-at-libraries', worldState),
-                getDescription: () => 'Your search turns up a promising lead.',
-            },
-            {
-                ...outcomes.gainSkill("research", "Methodical archive work sharpens your research skills."),
-                odds: (f) => hasSkill(f, 'research') ? 0 : 1,
-            },
-            {
-                ...outcomes.noOutcome(),
-                odds: () => 1,
-            },
-        ],
-    }),
+                {
+                    ...outcomes.gainSkill("research", "Methodical archive work sharpens your research skills."),
+                    odds: (f) => hasSkill(f, 'research') ? 0 : 1,
+                },
+                {
+                    ...outcomes.noOutcome(),
+                    odds: () => 1,
+                },
+            ],
+        };
+    },
 
-    exploreHistoricSites: (city: City, worldState: WorldState): Action => ({
-        id: "explore-historic-sites",
-        type: 'site',
-        title: "Explore Historic Sites",
-        description: `Visit ${city.name}'s churches, cemeteries, and forgotten corners.`,
-        outcomes: [
-            {
-                id: 'sites-discover',
-                odds: (f, gs) => {
-                    const n = countUndiscovered(city.id, 'explore-historic-sites', worldState, gs);
-                    if (n === 0) return 0;
-                    return hasSkill(f, 'observation') || hasSkill(f, 'analysis') ? 4 : 2;
+    exploreHistoricSites: (city: City, worldState: WorldState): Action => {
+        const v = CITY_VENUES[city.id];
+        const venue = v?.site ?? `${city.name}'s historic sites`;
+        return {
+            id: "explore-historic-sites",
+            type: 'site',
+            title: `Explore ${venue}`,
+            description: `Walk ${venue} at odd hours, looking for what the tourists miss.`,
+            outcomes: [
+                {
+                    id: 'sites-discover',
+                    odds: (f, gs) => {
+                        const n = countUndiscovered(city.id, 'explore-historic-sites', worldState, gs);
+                        if (n === 0) return 0;
+                        return hasSkill(f, 'observation') || hasSkill(f, 'analysis') ? 4 : 2;
+                    },
+                    enact: makeExploreEnact(city.id, 'explore-historic-sites', worldState),
+                    getDescription: () => 'You find something the city keeps quiet about.',
                 },
-                enact: makeExploreEnact(city.id, 'explore-historic-sites', worldState),
-                getDescription: () => 'You find something the city keeps quiet about.',
-            },
-            {
-                ...outcomes.gainTrait("historically-minded", "Exploring these places shifts your perspective."),
-                odds: (f) => f.traits.includes('historically-minded') ? 0 : 1,
-            },
-            {
-                ...outcomes.noOutcome(),
-                odds: () => 1,
-            },
-        ],
-    }),
+                {
+                    ...outcomes.gainTrait("historically-minded", "Spending time here shifts your perspective permanently."),
+                    odds: (f) => f.traits.includes('historically-minded') ? 0 : 1,
+                },
+                {
+                    ...outcomes.noOutcome(),
+                    odds: () => 1,
+                },
+            ],
+        };
+    },
 
-    visitCoffeeShops: (city: City, worldState: WorldState): Action => ({
-        id: "visit-coffee-shops",
-        type: 'patron',
-        title: "Visit Coffee Shops",
-        description: `Network in ${city.name}'s cafes and intellectual gathering places.`,
-        outcomes: [
-            {
-                id: 'coffee-discover',
-                odds: (f, gs) => {
-                    const n = countUndiscovered(city.id, 'visit-coffee-shops', worldState, gs);
-                    if (n === 0) return 0;
-                    return hasSkill(f, 'networking') || hasSkill(f, 'persuasion') ? 4 : 2;
+    visitCoffeeShops: (city: City, worldState: WorldState): Action => {
+        const v = CITY_VENUES[city.id];
+        const venue = v?.cafe ?? `${city.name}'s cafés`;
+        return {
+            id: "visit-coffee-shops",
+            type: 'patron',
+            title: `Frequent ${venue}`,
+            description: `Take a regular table at ${venue} and let the conversation come to you.`,
+            outcomes: [
+                {
+                    id: 'coffee-discover',
+                    odds: (f, gs) => {
+                        const n = countUndiscovered(city.id, 'visit-coffee-shops', worldState, gs);
+                        if (n === 0) return 0;
+                        return hasSkill(f, 'networking') || hasSkill(f, 'persuasion') ? 4 : 2;
+                    },
+                    enact: makeExploreEnact(city.id, 'visit-coffee-shops', worldState),
+                    getDescription: () => 'You meet someone worth knowing.',
                 },
-                enact: makeExploreEnact(city.id, 'visit-coffee-shops', worldState),
-                getDescription: () => 'You meet someone worth knowing.',
-            },
-            {
-                ...outcomes.gainSkill("networking", "Regular socialising develops your networking skills."),
-                odds: (f) => hasSkill(f, 'networking') ? 0 : 1,
-            },
-            {
-                ...outcomes.noOutcome(),
-                odds: () => 1,
-            },
-        ],
-    }),
+                {
+                    ...outcomes.gainSkill("networking", "Regular presence here develops your networking skills."),
+                    odds: (f) => hasSkill(f, 'networking') ? 0 : 1,
+                },
+                {
+                    ...outcomes.noOutcome(),
+                    odds: () => 1,
+                },
+            ],
+        };
+    },
 };
 
 // ============================================================================
