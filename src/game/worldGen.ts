@@ -52,11 +52,13 @@ const CONNECTED_TRAITS = ['well-connected', 'charming', 'suspicious'];
 
 // ── Name generators ────────────────────────────────────────────────────────
 
+function article(word: string): string { return /^[aeiou]/i.test(word) ? 'An' : 'A'; }
+
 function instName():      string { return `The ${pick(INST_ADJ)} ${pick(INST_NOUN)}`; }
-function gathName():      string { return `A ${pick(GATH_ADJ)} ${pick(GATH_NOUN)}`; }
+function gathName():      string { const adj = pick(GATH_ADJ);  return `${article(adj)} ${adj} ${pick(GATH_NOUN)}`; }
 function gathHouseName(): string { return `The ${pick(GATH_VENUE_ADJ)} ${pick(GATH_VENUE_NOUN)}`; }
-function siteName():      string { return `A ${pick(SITE_ADJ)} ${pick(SITE_NOUN)}`; }
-function textName():      string { return `An ${pick(TEXT_ADJ)} ${pick(TEXT_NOUN)} of ${pick(TEXT_SUBJ)}`; }
+function siteName():      string { const adj = pick(SITE_ADJ);  return `${article(adj)} ${adj} ${pick(SITE_NOUN)}`; }
+function textName():      string { const adj = pick(TEXT_ADJ);  return `${article(adj)} ${adj} ${pick(TEXT_NOUN)} of ${pick(TEXT_SUBJ)}`; }
 function personName(cityId: string): string {
     const city = getCityById(cityId);
     if (!city) return 'An Unknown Contact';
