@@ -108,11 +108,6 @@ export default function CultGameInterface() {
   const [view, setView]                         = useState<'map' | 'location' | 'report'>('map');
   const [cards, setCards]                       = useState<Record<string, CardData>>({});
   const [weekResults, setWeekResults]           = useState<ClientWeekResults | null>(null);
-  // For drop compatibility checking: verb extracted from slot id
-  const getSlotVerb = useCallback((slotId: string): Verb | null => {
-    const verb = slotId.split(':')[1] as Verb;
-    return verb ?? null;
-  }, []);
   const navigate = useNavigate();
   const { gameId } = useParams<{ gameId: string }>();
   const { send, subscribe } = useGameSocket();
@@ -178,21 +173,20 @@ export default function CultGameInterface() {
   }, [gameState]);
 
   const handleCardsChange = useCallback((newCards: Record<string, CardData>) => {
-    // Reject drops into slots whose verb is incompatible with the card's hook types
-    for (const [cardId, data] of Object.entries(newCards)) {
-      if (data.slotId) {
-        const verb = getSlotVerb(data.slotId);
-        const item = hookItems.find(i => i.id === cardId);
-        if (verb && item && item.types && !verbCompatible(verb, item.types as HookType[])) {
-          console.log(`[game] Rejected drop: ${verb} incompatible with ${item.types.join(',')}`)
-          // Revert to position before card entered the slot
-          const prev = cards[cardId];
-          return setCards(prev ? { ...cards, [cardId]: { ...prev, slotId: undefined } } : cards);
-        }
-      }
-    }
     setCards(newCards);
-  }, [cards, hookItems, getSlotVerb]);
+  }, []);
+
+  const canDropToSlot = useCallback((slotId: string, cardId: string): boolean => {
+    const verb = slotId.split(':')[1] as Verb;
+    if (!verb) return true;
+    const item = hookItems.find(i => i.id === cardId);
+    if (!item?.types) return true;
+    if (!verbCompatible(verb, item.types as HookType[])) {
+      console.log(`[game] Rejected drop: ${verb} incompatible with ${item.types.join(',')}`);
+      return false;
+    }
+    return true;
+  }, [hookItems]);
 
   const handleCompleteWeek = useCallback(() => {
     if (!gameId || !gameState) return;
@@ -230,7 +224,7 @@ export default function CultGameInterface() {
   const reportCity = weekResults ? getCityById(weekResults.cityId) : undefined;
 
   return (
-<Table cards={cards} onCardsChange={handleCardsChange}>
+<Table cards={cards} onCardsChange={handleCardsChange} canDropToSlot={canDropToSlot}>
 
       {/* ════════════════════════════════════════════════════════════════
           HEADER — persists across all views

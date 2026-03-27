@@ -142,17 +142,19 @@ export function getAvailableActionsForCity(
 // WEEK EXECUTION ENGINE
 // ============================================================================
 
-export function performAction(action: Action, follower: Follower, gameState: GameState): Outcome {
+export function performAction(action: Action, follower: Follower, gameState: GameState, slotCount: number = 1): Outcome {
     const totalOdds = action.outcomes.reduce((sum, o) => sum + o.odds(follower, gameState), 0);
     if (totalOdds <= 0) return outcomes.noOutcome();
 
-    const rand = Math.random() * totalOdds;
+    // Roll against a range scaled by slotCount — only the first 1/slotCount of
+    // the range triggers an outcome, giving each verb a 1/slotCount success rate.
+    const rand = Math.random() * totalOdds * slotCount;
     let cumulative = 0;
     for (const o of action.outcomes) {
         cumulative += o.odds(follower, gameState);
         if (rand <= cumulative) return o;
     }
-    return action.outcomes[action.outcomes.length - 1];
+    return outcomes.noOutcome(); // rand fell in the scaled-up "miss" zone
 }
 
 export function performCityActions(
@@ -160,6 +162,13 @@ export function performCityActions(
     items: Action[],
     gameState: GameState,
 ): Record<string, Outcome> {
+    // Count how many slots are filled per follower this week.
+    const slotsPerFollower: Record<string, number> = {};
+    for (const slotKey of Object.keys(assignments)) {
+        const followerId = slotKey.split(':')[0];
+        slotsPerFollower[followerId] = (slotsPerFollower[followerId] ?? 0) + 1;
+    }
+
     const results: Record<string, Outcome> = {};
     for (const [slotKey, itemId] of Object.entries(assignments)) {
         const item = items.find(a => a.id === itemId);
@@ -173,7 +182,9 @@ export function performCityActions(
             console.error(`[actions] Follower not found: ${followerId}`);
             continue;
         }
-        results[slotKey] = performAction(item, follower, gameState);
+        const slotCount = slotsPerFollower[followerId] ?? 1;
+        console.log(`[actions] ${follower.name} slot ${slotKey}: slotCount=${slotCount}`);
+        results[slotKey] = performAction(item, follower, gameState, slotCount);
     }
     return results;
 }

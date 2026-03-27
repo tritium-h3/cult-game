@@ -95,11 +95,12 @@ function CardExplosion({ gx, gy, onDone }: { gx: number; gy: number; onDone: () 
 interface TableInnerProps {
   children: ReactNode;
   onSlotDrop?: (slotId: string, cardId: string) => void;
+  canDropToSlot?: (slotId: string, cardId: string) => boolean;
   exitingCards: Record<string, GridPos>;
   onExitDone: (id: string) => void;
 }
 
-function TableInner({ children, onSlotDrop, exitingCards, onExitDone }: TableInnerProps) {
+function TableInner({ children, onSlotDrop, canDropToSlot, exitingCards, onExitDone }: TableInnerProps) {
   const { config, cards, drag, slotRegistry, setSlotCard, findCollision, commitDrag, revertDrag } = useTable();
 
   const tableRef = useRef<HTMLDivElement>(null);
@@ -201,6 +202,13 @@ function TableInner({ children, onSlotDrop, exitingCards, onExitDone }: TableInn
         }
       }
 
+      // Check if the slot will accept this card — revert to origin if rejected.
+      if (targetSlotId && canDropToSlot && !canDropToSlot(targetSlotId, cardId)) {
+        revertDrag();
+        console.log(`[Table] Drop rejected by canDropToSlot: slot ${targetSlotId}, card ${cardId}`);
+        return;
+      }
+
       // Free the old slot if the card was in one.
       const prevCard = cards[cardId];
       if (prevCard?.slotId && prevCard.slotId !== targetSlotId) {
@@ -215,7 +223,7 @@ function TableInner({ children, onSlotDrop, exitingCards, onExitDone }: TableInn
 
       console.log(`[Table] Card ${cardId} settled at grid (${clampedGx},${clampedGy})${targetSlotId ? ` in slot ${targetSlotId}` : ''}`);
     },
-    [drag, cards, config, commitDrag, revertDrag, slotRegistry, setSlotCard, findCollision, onSlotDrop]
+    [drag, cards, config, commitDrag, revertDrag, slotRegistry, setSlotCard, findCollision, onSlotDrop, canDropToSlot]
   );
 
   // Left-click on the table background (not on a card — cards call stopPropagation) starts panning.
@@ -280,10 +288,11 @@ interface TableProps {
   /** Called whenever a card's position or slot changes after a drop. */
   onCardsChange: (cards: Record<string, CardData>) => void;
   onSlotDrop?: (slotId: string, cardId: string) => void;
+  canDropToSlot?: (slotId: string, cardId: string) => boolean;
   children?: ReactNode;
 }
 
-export function Table({ config, cards, onCardsChange, onSlotDrop, children }: TableProps) {
+export function Table({ config, cards, onCardsChange, onSlotDrop, canDropToSlot, children }: TableProps) {
   const [exitingCards, setExitingCards] = useState<Record<string, GridPos>>({});
   // Stable ref so the effect always sees the previous render's cards without re-subscribing.
   const prevCardsRef = useRef<Record<string, CardData>>(cards);
@@ -313,6 +322,7 @@ export function Table({ config, cards, onCardsChange, onSlotDrop, children }: Ta
     <TableProvider config={config} cards={cards} onCardsChange={onCardsChange}>
       <TableInner
         onSlotDrop={onSlotDrop}
+        canDropToSlot={canDropToSlot}
         exitingCards={exitingCards}
         onExitDone={handleExitDone}
       >
