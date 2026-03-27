@@ -17,13 +17,38 @@
   }
   .ui-hook-card:hover { background-color: #3a2e1c; }
 
-  /* Per-type custom properties — all four colours change together */
+  /* Per-type custom properties — border, badge, and title change together */
   .ui-hook-card[data-type="site"] {
     --card-border: rgb(146 64 14 / .5);
     --badge-bg:    rgb(146 64 14 / .85);
     --badge-fg:    rgb(254 243 199);
     --title:       rgb(253 230 138);
   }
+  .ui-hook-card[data-type="person"] {
+    --card-border: rgb(15 118 110 / .5);
+    --badge-bg:    rgb(15 118 110 / .85);
+    --badge-fg:    rgb(204 251 241);
+    --title:       rgb(153 246 228);
+  }
+  .ui-hook-card[data-type="gathering"] {
+    --card-border: rgb(109 40 217 / .5);
+    --badge-bg:    rgb(109 40 217 / .85);
+    --badge-fg:    rgb(237 233 254);
+    --title:       rgb(221 214 254);
+  }
+  .ui-hook-card[data-type="institution"] {
+    --card-border: rgb(67 56 202 / .5);
+    --badge-bg:    rgb(67 56 202 / .85);
+    --badge-fg:    rgb(224 231 255);
+    --title:       rgb(199 210 254);
+  }
+  .ui-hook-card[data-type="text"] {
+    --card-border: rgb(159 18 57 / .5);
+    --badge-bg:    rgb(159 18 57 / .85);
+    --badge-fg:    rgb(255 228 230);
+    --title:       rgb(254 205 211);
+  }
+  /* Legacy types kept for backward compatibility */
   .ui-hook-card[data-type="book"] {
     --card-border: rgb(67 56 202 / .5);
     --badge-bg:    rgb(67 56 202 / .85);

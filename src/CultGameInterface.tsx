@@ -5,7 +5,8 @@ import type { CardData } from './ui/types';
 import { HookCard } from './ui/templates/HookCard';
 import { FollowerSheet } from './ui/templates/FollowerSheet';
 import { getCityById } from './game/world';
-import type { City, Follower, ClientGameState, ClientAction, HookItemType } from './game/types';
+import type { City, Follower, ClientGameState, ClientAction, HookType, Verb } from './game/types';
+import { verbCompatible } from './game/types';
 import { useGameSocket } from './hooks/useGameSocket';
 
 /** Week-results payload from the server */
@@ -38,15 +39,19 @@ const HOOK_START_GY = 3;    // below header (gy=2) + 1-cell margin
 const HOOK_ROW_STEP = 3;    // cardH (3), no gap
 
 // Location view — follower sheets (right, 1 per row stacked vertically)
-// Each sheet: 13 cols × 3 rows. Info section left (8 cols), slots on the right (dy=0).
+// Each sheet: 13 cols × 3 rows. Info section + verb slots share the same 3-row band.
 // Single column at gx=7; right edge at gx=20 (1-cell margin before table edge).
-const FOL_GX        = 7;    // 1-cell gap after last hook col (gx=4+2=6 → gx=7)
+// Info width shrinks to 6 cols when follower has 3 verbs so all slots fit (7,9,11).
+const FOL_GX        = 7;
 const FOL_COLS      = 13;
-const FOL_ROWS      = 3;    // exact card height — info and slots share the same 3-row band
-const FOL_INFO_COLS = 8;    // grid cols allocated to name/background on the left
-const FOL_PER_ROW   = 1;    // one follower per horizontal row
-const FOL_COL_STEP  = FOL_COLS + 1;  // unused when PER_ROW=1, kept for symmetry
-const FOL_ROW_STEP  = FOL_ROWS + 1;  // 3 rows + 1 gap = 4
+const FOL_ROWS      = 3;
+const FOL_PER_ROW   = 1;
+const FOL_COL_STEP  = FOL_COLS + 1;
+const FOL_ROW_STEP  = FOL_ROWS + 1;
+
+function followerInfoCols(verbCount: number): number {
+  return verbCount >= 3 ? 6 : 8;
+}
 
 // Report view — single large sheet
 const RPT_GX = 1, RPT_GY = 3, RPT_COLS = 20, RPT_ROWS = 8;
@@ -58,15 +63,18 @@ function followerGY(idx: number) { return HOOK_START_GY + Math.floor(idx / FOL_P
 function cityGX(idx: number) { return MAP_CITY_START_GX + (idx % MAP_CITY_PER_ROW) * MAP_CITY_COL_STEP; }
 function cityGY(idx: number) { return MAP_CITY_START_GY + Math.floor(idx / MAP_CITY_PER_ROW) * MAP_CITY_ROW_STEP; }
 
-/** Slot defs (dx/dy within sheet) for a follower's assignment slots. */
-function slotDefs(followerId: string, numSlots: number) {
-  // Slots sit to the right of the info section (FOL_INFO_COLS=8).
-  // 1 slot: centred in remaining 5-col space (dx=10, occupies cols 10–11).
-  // 2 slots: side-by-side (dx=9 and dx=11, occupying cols 9–10 and 11–12).
-  return Array.from({ length: numSlots }, (_, i) => ({
-    id: `${followerId}:${i}`,
-    dx: numSlots === 1 ? 10 : 9 + (i % 2) * 2,
+/** Slot defs (dx/dy within sheet) for a follower's verb slots. */
+function slotDefs(followerId: string, verbs: Verb[]) {
+  // Slots sit to the right of the info section.
+  // Info is 6 cols wide for 3 verbs → slots at dx=7,9,11 (all fit in 13-col sheet).
+  // Info is 8 cols wide for 1-2 verbs → slots at dx=9,11 or centred at dx=10.
+  const infoCols = followerInfoCols(verbs.length);
+  const startDx = verbs.length === 1 ? infoCols + 2 : infoCols + 1;
+  return verbs.map((verb, i) => ({
+    id: `${followerId}:${verb}`,
+    dx: startDx + i * 2,
     dy: 0,
+    label: verb,
   }));
 }
 
@@ -100,6 +108,11 @@ export default function CultGameInterface() {
   const [view, setView]                         = useState<'map' | 'location' | 'report'>('map');
   const [cards, setCards]                       = useState<Record<string, CardData>>({});
   const [weekResults, setWeekResults]           = useState<ClientWeekResults | null>(null);
+  // For drop compatibility checking: verb extracted from slot id
+  const getSlotVerb = useCallback((slotId: string): Verb | null => {
+    const verb = slotId.split(':')[1] as Verb;
+    return verb ?? null;
+  }, []);
   const navigate = useNavigate();
   const { gameId } = useParams<{ gameId: string }>();
   const { send, subscribe } = useGameSocket();
@@ -164,6 +177,23 @@ export default function CultGameInterface() {
     setView('location');
   }, [gameState]);
 
+  const handleCardsChange = useCallback((newCards: Record<string, CardData>) => {
+    // Reject drops into slots whose verb is incompatible with the card's hook types
+    for (const [cardId, data] of Object.entries(newCards)) {
+      if (data.slotId) {
+        const verb = getSlotVerb(data.slotId);
+        const item = hookItems.find(i => i.id === cardId);
+        if (verb && item && item.types && !verbCompatible(verb, item.types as HookType[])) {
+          console.log(`[game] Rejected drop: ${verb} incompatible with ${item.types.join(',')}`)
+          // Revert to position before card entered the slot
+          const prev = cards[cardId];
+          return setCards(prev ? { ...cards, [cardId]: { ...prev, slotId: undefined } } : cards);
+        }
+      }
+    }
+    setCards(newCards);
+  }, [cards, hookItems, getSlotVerb]);
+
   const handleCompleteWeek = useCallback(() => {
     if (!gameId || !gameState) return;
     const cityId = selectedLocation?.id ?? gameState.hqLocation;
@@ -200,7 +230,7 @@ export default function CultGameInterface() {
   const reportCity = weekResults ? getCityById(weekResults.cityId) : undefined;
 
   return (
-    <Table cards={cards} onCardsChange={setCards}>
+<Table cards={cards} onCardsChange={handleCardsChange}>
 
       {/* ════════════════════════════════════════════════════════════════
           HEADER — persists across all views
@@ -332,9 +362,9 @@ export default function CultGameInterface() {
           <FollowerSheet
             name={follower.name}
             background={follower.background}
-            skills={Array.isArray(follower.skills) ? follower.skills : []}
-            slots={slotDefs(follower.id, follower.slots ?? 1)}
-            infoCols={FOL_INFO_COLS}
+            skills={Array.isArray(follower.verbs) ? follower.verbs : []}
+            slots={slotDefs(follower.id, follower.verbs ?? [])}
+            infoCols={followerInfoCols((follower.verbs ?? []).length)}
           />
         </Sheet>
       ))}
@@ -388,7 +418,7 @@ export default function CultGameInterface() {
         return (
           <Card key={cardId} id={cardId} dealDelay={idx * 60}>
             <HookCard
-              type={(item.type as HookItemType) ?? 'site'}
+              type={(item.types?.[0] as HookType) ?? 'institution'}
               title={item.title}
               description={item.description}
             />

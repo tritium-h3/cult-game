@@ -1,12 +1,6 @@
 // actions.ts
-import { Outcome, Follower, GameState, City, Action, WorldState, WorldItem, ItemEffect } from "./types";
-import { getCityById, CITY_VENUES } from "./world";
-
-// ============================================================================
-// HELPERS
-// ============================================================================
-
-const hasSkill = (follower: Follower, skill: string) => follower.skills.includes(skill);
+import { Outcome, Follower, GameState, Action, WorldState, WorldItem, ItemEffect, Verb } from "./types";
+import { getCityById } from "./world";
 
 // ============================================================================
 // OUTCOME FACTORIES
@@ -18,18 +12,6 @@ const outcomes = {
         odds: () => 1,
         enact: () => {},
         getDescription: () => "Nothing of note happens.",
-    }),
-
-    gainSkill: (skill: string, description: string): Outcome => ({
-        id: `gain-skill-${skill}`,
-        odds: () => 1,
-        enact: (follower: Follower) => {
-            if (!follower.skills.includes(skill)) {
-                follower.skills.push(skill);
-                console.log(`[outcome] ${follower.name} gained skill: ${skill}`);
-            }
-        },
-        getDescription: () => description,
     }),
 
     gainTrait: (trait: string, description: string): Outcome => ({
@@ -44,8 +26,8 @@ const outcomes = {
         getDescription: () => description,
     }),
 
-    addFollower: (skills: string[], description: string): Outcome => ({
-        id: `add-follower-${skills.join('-')}`,
+    addFollower: (verbs: Verb[], description: string): Outcome => ({
+        id: `add-follower-${verbs.join('-')}`,
         odds: () => 1,
         enact: (_follower: Follower, gameState: GameState) => {
             const newFollower: Follower = {
@@ -54,11 +36,10 @@ const outcomes = {
                 background: '',
                 location: _follower.location,
                 traits: [],
-                skills: [...skills],
-                slots: 1,
+                verbs: [...verbs],
             };
             gameState.followers.push(newFollower);
-            console.log(`[outcome] New follower added with skills: ${skills}`);
+            console.log(`[outcome] New follower added with verbs: ${verbs}`);
         },
         getDescription: () => description,
     }),
@@ -70,14 +51,11 @@ const outcomes = {
 
 function effectToOutcome(effect: ItemEffect): Outcome {
     switch (effect.type) {
-        case 'GainSkill':
-            return outcomes.gainSkill(effect.skill, effect.description);
-
         case 'GainTrait':
             return outcomes.gainTrait(effect.trait, effect.description);
 
         case 'AddFollower':
-            return outcomes.addFollower(effect.skills, effect.description);
+            return outcomes.addFollower(effect.verbs, effect.description);
 
         case 'DiscoverItem':
             return {
@@ -89,7 +67,7 @@ function effectToOutcome(effect: ItemEffect): Outcome {
                     }
                     if (!gameState.discoveredItems[effect.cityId].includes(effect.itemId)) {
                         gameState.discoveredItems[effect.cityId].push(effect.itemId);
-                        console.log(`[outcome] Item effect revealed: ${effect.itemId}`);
+                        console.log(`[outcome] Item revealed: ${effect.itemId}`);
                     }
                 },
                 getDescription: () => effect.description,
@@ -102,229 +80,62 @@ function effectToOutcome(effect: ItemEffect): Outcome {
 }
 
 /**
- * Convert a discovered WorldItem into a draggable Action card.
- * All effects fire as a single compound outcome so nothing is skipped.
+ * Convert a WorldItem into a draggable Action card.
+ * All effects are weighted equally; one fires per week.
  */
 export function worldItemToAction(item: WorldItem): Action {
     const effectOutcomes = item.effects.map(effectToOutcome);
+    const totalWeight = effectOutcomes.length;
 
     const compoundOutcome: Outcome = {
         id: `use-item-${item.id}`,
-        odds: () => 1,
+        odds: () => totalWeight,
         enact: (follower: Follower, gameState: GameState) => {
-            for (const o of effectOutcomes) {
-                o.enact(follower, gameState);
-            }
+            // Pick one effect at random
+            const chosen = effectOutcomes[Math.floor(Math.random() * effectOutcomes.length)];
+            chosen.enact(follower, gameState);
         },
         getDescription: (_follower: Follower) => {
             const lines = item.effects
                 .filter(e => e.type !== 'NoEffect')
                 .map(e => (e as any).description)
                 .filter(Boolean);
-            return lines.join(' ') || 'You engage with what you have found.';
+            return lines[0] || 'You engage with what you have found.';
         },
     };
 
     return {
         id: item.id,
         title: item.name,
-        description: item.flavorDescription || `A ${item.type} of uncertain significance.`,
-        type: item.type,
-        outcomes: [compoundOutcome],
+        description: item.flavorDescription || `A ${item.types[0]} of uncertain significance.`,
+        types: item.types,
+        outcomes: [compoundOutcome, { ...outcomes.noOutcome(), odds: () => 1 }],
     };
 }
-
-// ============================================================================
-// EXPLORATION ACTIONS
-// ============================================================================
-
-function countUndiscovered(
-    cityId: string,
-    actionId: string,
-    worldState: WorldState,
-    gameState: GameState,
-): number {
-    const cityItems = worldState.items[cityId] ?? [];
-    const discovered = gameState.discoveredItems[cityId] ?? [];
-    return cityItems.filter(item => item.discoveredBy === actionId && !discovered.includes(item.id)).length;
-}
-
-function makeExploreEnact(cityId: string, actionId: string, worldState: WorldState) {
-    return ((_follower: Follower, gameState: GameState) => {
-        const cityItems = worldState.items[cityId] ?? [];
-        const discovered = gameState.discoveredItems[cityId] ?? [];
-        const undiscovered = cityItems.filter(
-            item => item.discoveredBy === actionId && !discovered.includes(item.id)
-        );
-        if (undiscovered.length > 0) {
-            const pick = undiscovered[Math.floor(Math.random() * undiscovered.length)];
-            if (!gameState.discoveredItems[cityId]) gameState.discoveredItems[cityId] = [];
-            gameState.discoveredItems[cityId].push(pick.id);
-            console.log(`[discovery] ${actionId} revealed: ${pick.name} (${pick.id})`);
-        } else {
-            console.log(`[discovery] Nothing left via ${actionId} in ${cityId}`);
-        }
-    });
-}
-
-const actions = {
-    attendCulturalEvents: (city: City, worldState: WorldState): Action => {
-        const v = CITY_VENUES[city.id];
-        const venue = v?.culturalVenue ?? `${city.name}'s cultural venues`;
-        return {
-            id: "attend-cultural-events",
-            type: 'site',
-            title: `Attend Events at ${venue}`,
-            description: `Mingle with performers, collectors, and seekers at ${venue}.`,
-            outcomes: [
-                {
-                    id: 'attend-discover',
-                    odds: (f, gs) => {
-                        const n = countUndiscovered(city.id, 'attend-cultural-events', worldState, gs);
-                        if (n === 0) return 0;
-                        return hasSkill(f, 'networking') || hasSkill(f, 'artistic') ? 4 : 2;
-                    },
-                    enact: makeExploreEnact(city.id, 'attend-cultural-events', worldState),
-                    getDescription: () => 'You uncover something of interest at the event.',
-                },
-                {
-                    ...outcomes.gainSkill("networking", "Mingling here develops your networking skills."),
-                    odds: (f) => hasSkill(f, 'networking') ? 0 : 1,
-                },
-                {
-                    ...outcomes.noOutcome(),
-                    odds: () => 1,
-                },
-            ],
-        };
-    },
-
-    researchAtLibraries: (city: City, worldState: WorldState): Action => {
-        const v = CITY_VENUES[city.id];
-        const venue = v?.library ?? `${city.name}'s archives`;
-        return {
-            id: "research-at-libraries",
-            type: 'book',
-            title: `Research at ${venue}`,
-            description: `Search the restricted stacks and back catalogues of ${venue} for occult material.`,
-            outcomes: [
-                {
-                    id: 'research-discover',
-                    odds: (f, gs) => {
-                        const n = countUndiscovered(city.id, 'research-at-libraries', worldState, gs);
-                        if (n === 0) return 0;
-                        return hasSkill(f, 'research') ? 4 : 2;
-                    },
-                    enact: makeExploreEnact(city.id, 'research-at-libraries', worldState),
-                    getDescription: () => 'Your search turns up a promising lead.',
-                },
-                {
-                    ...outcomes.gainSkill("research", "Methodical archive work sharpens your research skills."),
-                    odds: (f) => hasSkill(f, 'research') ? 0 : 1,
-                },
-                {
-                    ...outcomes.noOutcome(),
-                    odds: () => 1,
-                },
-            ],
-        };
-    },
-
-    exploreHistoricSites: (city: City, worldState: WorldState): Action => {
-        const v = CITY_VENUES[city.id];
-        const venue = v?.site ?? `${city.name}'s historic sites`;
-        return {
-            id: "explore-historic-sites",
-            type: 'site',
-            title: `Explore ${venue}`,
-            description: `Walk ${venue} at odd hours, looking for what the tourists miss.`,
-            outcomes: [
-                {
-                    id: 'sites-discover',
-                    odds: (f, gs) => {
-                        const n = countUndiscovered(city.id, 'explore-historic-sites', worldState, gs);
-                        if (n === 0) return 0;
-                        return hasSkill(f, 'observation') || hasSkill(f, 'analysis') ? 4 : 2;
-                    },
-                    enact: makeExploreEnact(city.id, 'explore-historic-sites', worldState),
-                    getDescription: () => 'You find something the city keeps quiet about.',
-                },
-                {
-                    ...outcomes.gainTrait("historically-minded", "Spending time here shifts your perspective permanently."),
-                    odds: (f) => f.traits.includes('historically-minded') ? 0 : 1,
-                },
-                {
-                    ...outcomes.noOutcome(),
-                    odds: () => 1,
-                },
-            ],
-        };
-    },
-
-    visitCoffeeShops: (city: City, worldState: WorldState): Action => {
-        const v = CITY_VENUES[city.id];
-        const venue = v?.cafe ?? `${city.name}'s cafés`;
-        return {
-            id: "visit-coffee-shops",
-            type: 'patron',
-            title: `Frequent ${venue}`,
-            description: `Take a regular table at ${venue} and let the conversation come to you.`,
-            outcomes: [
-                {
-                    id: 'coffee-discover',
-                    odds: (f, gs) => {
-                        const n = countUndiscovered(city.id, 'visit-coffee-shops', worldState, gs);
-                        if (n === 0) return 0;
-                        return hasSkill(f, 'networking') || hasSkill(f, 'persuasion') ? 4 : 2;
-                    },
-                    enact: makeExploreEnact(city.id, 'visit-coffee-shops', worldState),
-                    getDescription: () => 'You meet someone worth knowing.',
-                },
-                {
-                    ...outcomes.gainSkill("networking", "Regular presence here develops your networking skills."),
-                    odds: (f) => hasSkill(f, 'networking') ? 0 : 1,
-                },
-                {
-                    ...outcomes.noOutcome(),
-                    odds: () => 1,
-                },
-            ],
-        };
-    },
-};
 
 // ============================================================================
 // RUNTIME ACTION BUILDER
 // ============================================================================
 
 /**
- * Returns the full list of actions available to followers in a city:
- * the 4 permanent exploration actions plus any already-discovered WorldItems.
+ * Returns all hook cards available to followers in a city:
+ *   - Starter hooks (always present)
+ *   - Items discovered via previous engagement (DiscoverItem effects)
  */
 export function getAvailableActionsForCity(
     cityId: string,
     worldState: WorldState,
     gameState: GameState,
 ): Action[] {
-    const city = getCityById(cityId);
-    if (!city) return [];
-
-    const explorationActions: Action[] = [
-        actions.attendCulturalEvents(city, worldState),
-        actions.researchAtLibraries(city, worldState),
-        actions.exploreHistoricSites(city, worldState),
-        actions.visitCoffeeShops(city, worldState),
-    ];
-
-    const discovered = gameState.discoveredItems[cityId] ?? [];
     const cityItems = worldState.items[cityId] ?? [];
-    const discoveredActions: Action[] = discovered
-        .map(id => cityItems.find(item => item.id === id))
-        .filter((item): item is WorldItem => item !== undefined)
-        .map(item => worldItemToAction(item));
+    const discovered = new Set(gameState.discoveredItems[cityId] ?? []);
 
-    console.log(`[actions] ${cityId}: ${explorationActions.length} exploration + ${discoveredActions.length} discovered`);
-    return [...explorationActions, ...discoveredActions];
+    const available = cityItems.filter(
+        item => item.starterHook || discovered.has(item.id)
+    );
+
+    console.log(`[actions] ${cityId}: ${available.length} hooks available (${available.filter(i => i.starterHook).length} starter + ${available.filter(i => !i.starterHook && discovered.has(i.id)).length} discovered)`);
+    return available.map(item => worldItemToAction(item));
 }
 
 // ============================================================================
@@ -405,7 +216,7 @@ export function completeWeek(
         ),
         followers: gameState.followers.map(f => ({
             ...f,
-            skills: [...f.skills],
+            verbs: [...f.verbs],
             traits: [...f.traits],
         })),
     };

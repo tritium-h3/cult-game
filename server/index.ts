@@ -29,7 +29,7 @@ import {
   getNarrative,
   getGameState,
 } from '../src/game/reading';
-import type { GameState, WorldState, Action, Outcome, Card, HookItemType } from '../src/game/types';
+import type { GameState, WorldState, Action, Outcome, Card, HookType, Verb } from '../src/game/types';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GAMES_DIR = path.join(__dirname, 'games');
@@ -69,11 +69,6 @@ interface ClientWeekResults {
 // ── Persistence types ──────────────────────────────────────────────────────
 
 /** What gets written to disk for each game (both are plain JSON-serialisable) */
-interface PersistedState {
-  worldState: WorldState;
-  gameState: GameState;
-}
-
 interface PendingWeekResults {
   results: Record<string, Outcome>;
   updatedState: GameState;
@@ -92,29 +87,25 @@ interface GameEntry {
 
 const games = new Map<string, GameEntry>();
 
-function gameFilePath(gameId: string): string {
-  return path.join(GAMES_DIR, `${gameId}.json`);
+function gameDir(gameId: string): string {
+  return path.join(GAMES_DIR, gameId);
 }
 
 function loadAllGames(): void {
-  const files = fs.readdirSync(GAMES_DIR).filter(f => f.endsWith('.json'));
-  for (const file of files) {
-    const gameId = path.basename(file, '.json');
+  const entries = fs.readdirSync(GAMES_DIR, { withFileTypes: true });
+  const dirs = entries.filter(e => e.isDirectory());
+  for (const dir of dirs) {
+    const gameId = dir.name;
+    const worldPath = path.join(GAMES_DIR, gameId, 'world.json');
+    const gamePath  = path.join(GAMES_DIR, gameId, 'game.json');
     try {
-      const raw = fs.readFileSync(path.join(GAMES_DIR, file), 'utf-8');
-      const persisted = JSON.parse(raw);
-
-      // Skip games saved in the old format (pre-WorldState architecture)
-      if (!persisted.worldState || !persisted.gameState) {
-        console.log(`[state] Skipping old-format game ${gameId}`);
+      if (!fs.existsSync(worldPath) || !fs.existsSync(gamePath)) {
+        console.log(`[state] Skipping incomplete game directory ${gameId}`);
         continue;
       }
-
-      games.set(gameId, {
-        world: persisted.worldState as WorldState,
-        state: persisted.gameState as GameState,
-        pending: null,
-      });
+      const world = JSON.parse(fs.readFileSync(worldPath, 'utf-8')) as WorldState;
+      const state = JSON.parse(fs.readFileSync(gamePath,  'utf-8')) as GameState;
+      games.set(gameId, { world, state, pending: null });
       console.log(`[state] Loaded game ${gameId}`);
     } catch (e) {
       console.error(`[state] Failed to load game ${gameId}:`, e);
@@ -127,8 +118,10 @@ function persistGame(gameId: string): void {
   const entry = games.get(gameId);
   if (!entry) return;
   try {
-    const persisted: PersistedState = { worldState: entry.world, gameState: entry.state };
-    fs.writeFileSync(gameFilePath(gameId), JSON.stringify(persisted, null, 2));
+    const dir = gameDir(gameId);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'world.json'), JSON.stringify(entry.world, null, 2));
+    fs.writeFileSync(path.join(dir, 'game.json'),  JSON.stringify(entry.state, null, 2));
     console.log(`[state] Saved game ${gameId}`);
   } catch (e) {
     console.error(`[state] Failed to persist game ${gameId}:`, e);
@@ -147,11 +140,11 @@ function toClientGameState(state: GameState, world: WorldState): ClientGameState
   const clientMap: Record<string, ClientAction[]> = {};
   for (const cityId of world.cities) {
     const cityActions = getAvailableActionsForCity(cityId, world, state);
-    clientMap[cityId] = cityActions.map(a => ({
+      clientMap[cityId] = cityActions.map(a => ({
       id: a.id,
       title: a.title,
       description: a.description,
-      type: a.type,
+      types: a.types,
     }));
   }
   return { ...state, map: clientMap };
@@ -172,13 +165,13 @@ function handleGetState(ws: WebSocket, gameId: string | undefined): void {
   }
 }
 
-// Which item type to pre-discover based on the gateway (discovery) card
-const GATEWAY_TO_ITEM_TYPE: Record<string, HookItemType> = {
-  'inheritance': 'book',
+// Which hook type to use for initial discovery, based on the gateway (discovery) card
+const GATEWAY_TO_HOOK_TYPE: Record<string, HookType> = {
+  'inheritance': 'text',
   'accident':    'site',
-  'bargain':     'patron',
-  'dream':       'artifact',
-  'theft':       'artifact',
+  'bargain':     'person',
+  'dream':       'gathering',
+  'theft':       'institution',
 };
 
 async function handleInitReading(
@@ -198,18 +191,15 @@ async function handleInitReading(
   // ── Step 2: World generation ───────────────────────────────────────────
   const worldState = generateWorldState(gameState.hqLocation);
 
-  // ── Step 3: Seed starting discoveries based on gateway card ───────────
+  // ── Step 3: Seed one non-starter discovery based on gateway card ────────
   const gatewayId = selectedCards[1]?.id ?? 'inheritance';
-  const initialType = GATEWAY_TO_ITEM_TYPE[gatewayId] ?? 'book';
+  const initialType = GATEWAY_TO_HOOK_TYPE[gatewayId] ?? 'text';
   const hqItems = worldState.items[gameState.hqLocation] ?? [];
 
   const initialDiscovered: string[] = [];
-  const matchingItem = hqItems.find(item => item.type === initialType);
+  // Find the first hidden (non-starter) item matching the gateway type
+  const matchingItem = hqItems.find(item => !item.starterHook && item.types.includes(initialType));
   if (matchingItem) initialDiscovered.push(matchingItem.id);
-
-  // Add a second item from a different type
-  const otherItem = hqItems.find(item => item.type !== initialType && !initialDiscovered.includes(item.id));
-  if (otherItem) initialDiscovered.push(otherItem.id);
 
   if (initialDiscovered.length > 0) {
     gameState.discoveredItems[gameState.hqLocation] = initialDiscovered;
@@ -297,7 +287,7 @@ function handleCompleteWeek(
     results: clientResults,
     updatedState: toClientGameState(updatedState, entry.world),
     assignments,
-    items: items.map(a => ({ id: a.id, title: a.title, description: a.description, type: a.type })),
+    items: items.map(a => ({ id: a.id, title: a.title, description: a.description, types: a.types })),
     cityId,
   };
 
@@ -338,7 +328,7 @@ function handleLoadSample(ws: WebSocket): void {
       background: 'Former archaeologist turned mystic after discovering an ancient artifact',
       archetype: 'hermit',
       traits: 'Charismatic, obsessive, scholarly',
-      skills: ['research', 'occult-knowledge'],
+      verbs: ['Study', 'Explore'] as Verb[],
     },
     discovery: {
       type: 'inheritance',
@@ -364,8 +354,7 @@ function handleLoadSample(ws: WebSocket): void {
         background: 'Disillusioned philosophy professor',
         location: hqLocation,
         traits: ['intellectual', 'curious'],
-        skills: ['research', 'analysis'],
-        slots: 1,
+        verbs: ['Study', 'Talk'] as Verb[],
       },
       {
         id: 'follower-2',
@@ -373,8 +362,7 @@ function handleLoadSample(ws: WebSocket): void {
         background: 'Former tech entrepreneur seeking meaning',
         location: hqLocation,
         traits: ['wealthy', 'ambitious'],
-        skills: ['networking', 'wealth'],
-        slots: 1,
+        verbs: ['Work', 'Talk'] as Verb[],
       },
       {
         id: 'follower-3',
@@ -382,8 +370,7 @@ function handleLoadSample(ws: WebSocket): void {
         background: 'Artist drawn to the occult',
         location: hqLocation,
         traits: ['creative', 'sensitive'],
-        skills: ['artistic', 'occult-knowledge'],
-        slots: 1,
+        verbs: ['Perform', 'Explore'] as Verb[],
       },
     ],
     hqLocation,
@@ -395,9 +382,10 @@ function handleLoadSample(ws: WebSocket): void {
   const worldState = generateWorldState(hqLocation);
   const hqItems = worldState.items[hqLocation] ?? [];
   // Pre-discover first book and first patron so there are hook cards immediately
+  // Pre-discover the first hidden text and first hidden person hook
   const startingDiscovered = [
-    hqItems.find(i => i.type === 'book')?.id,
-    hqItems.find(i => i.type === 'patron')?.id,
+    hqItems.find(i => !i.starterHook && i.types.includes('text'))?.id,
+    hqItems.find(i => !i.starterHook && i.types.includes('person'))?.id,
   ].filter(Boolean) as string[];
   if (startingDiscovered.length > 0) {
     sampleState.discoveredItems[hqLocation] = startingDiscovered;
@@ -413,9 +401,9 @@ function handleLoadSample(ws: WebSocket): void {
 function handleReset(ws: WebSocket, gameId: string | undefined): void {
   if (gameId) {
     games.delete(gameId);
-    const fp = gameFilePath(gameId);
-    if (fs.existsSync(fp)) {
-      fs.unlinkSync(fp);
+    const dir = gameDir(gameId);
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true });
       console.log(`[reset] Game ${gameId} deleted`);
     }
   }

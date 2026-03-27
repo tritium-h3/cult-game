@@ -1,16 +1,17 @@
 import React from 'react';
 
-export type HookItemType = 'site' | 'book' | 'patron' | 'artifact';
+export type HookType = 'person' | 'gathering' | 'institution' | 'site' | 'text';
 
-const HOOK_LABELS: Record<HookItemType, string> = {
-  site: 'Site',
-  book: 'Book',
-  patron: 'Patron',
-  artifact: 'Artifact',
+const HOOK_LABELS: Record<HookType, string> = {
+  person:      'Person',
+  gathering:   'Gathering',
+  institution: 'Institution',
+  site:        'Site',
+  text:        'Text',
 };
 
 interface HookCardProps {
-  type: HookItemType;
+  type: HookType;
   title: string;
   description?: string;
   /** When provided, a discard button appears on hover. Call this to remove the card. */

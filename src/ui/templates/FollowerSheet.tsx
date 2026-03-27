@@ -72,6 +72,7 @@ export function FollowerSheet({ name, background, skills = [], slots, infoCols }
           )}
           {skills.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-0.5">
+              <span className="text-xs" style={{ color: 'rgba(217,119,6,0.4)', marginRight: 2 }}>Verbs:</span>
               {skills.map((skill) => (
                 <span key={skill} className="ui-skill-tag text-xs px-1.5 py-0.5 rounded">{skill}</span>
               ))}
@@ -101,6 +102,7 @@ export function FollowerSheet({ name, background, skills = [], slots, infoCols }
         )}
         {skills.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-0.5">
+            <span className="text-xs" style={{ color: 'rgba(217,119,6,0.4)', marginRight: 2 }}>Verbs:</span>
             {skills.map((skill) => (
               <span
                 key={skill}
