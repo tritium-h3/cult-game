@@ -11,6 +11,10 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     host: "0.0.0.0",
+    port: 5273,
+    // Fail loudly instead of silently drifting to the next free port — the
+    // backend port is a separate literal, so a drifting frontend is confusing.
+    strictPort: true,
     allowedHosts: ['torment-nexus.local', 'samarkand.hopto.org']
   },
   resolve: {

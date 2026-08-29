@@ -10,78 +10,63 @@ import { useGameSocket } from './hooks/useGameSocket';
 
 // ── Grid layout constants (1 unit = 80px, default cardW=2 cardH=3 → 160×240px) ──
 const GRID = 80;
-// 5 cards arranged in a 2-column layout with 1-cell margins from the screen edge.
-// Col1 at gx=1, col2 at gx=3 (1-cell left margin). 3 rows with 1-cell vertical gaps.
-//   row1 gy=1: card[0] col1, card[1] col2
-//   row2 gy=5: card[2] col1, card[3] col2   (1-cell gap: 1+3+1=5)
-//   row3 gy=9: card[4] centred at gx=2       (1-cell gap: 5+3+1=9)
-const SPREAD_CARD_GXS = [1, 3, 1, 3, 2];
-const SPREAD_CARD_GYS = [1, 1, 5, 5, 9];
-// Sheet: 1-cell right of the card area (col2 ends at gx=5, +1 gap = gx=6),
-// 1-cell top margin, 14 cols wide (accommodates slots dx=0..12+2=14), 11 rows tall.
-const SHEET_GX = 6;
+
+// ── The sheet ────────────────────────────────────────────────────────────────
+// ONE sheet, anchored at the same place in every phase. The five spread slots
+// live in its top band and never move, so a card placed during selection stays
+// exactly where it is through naming, narration and the ending. Only the sheet's
+// height and the content below the slot band change between phases.
+const SHEET_GX = 1;
 const SHEET_GY = 1;
-const SHEET_COLS = 14;
-const SHEET_ROWS = 11;
-// Slot dx offsets within the sheet (5 positions × 2-wide with 1-cell gap)
+const SHEET_COLS = 14;   // 5 slots × 2 wide + 4 × 1-cell gaps = 14
+/** Selection: slot band + prompt text. Bottom edge lands at y=560. */
+const SHEET_ROWS_SELECTION = 6;
+/** Naming / narrating / ready: slot band + content area. Bottom edge at y=880. */
+const SHEET_ROWS_READING = 10;
+
+/** Slot dx offsets — 2-wide slots with 1-cell gutters. */
 const SLOT_DXS = [0, 3, 6, 9, 12];
-// Slots start at dy=5, leaving 400px of text area above them
-const SLOT_DY = 5;
+/** The spread sits in the sheet's top band in every phase. */
+const SLOT_DY = 0;
+/** Content area begins just below the 3-row slot band. */
+const CONTENT_DY = 3;
 
-// ── Post-selection layout (naming / narrating / ready) ───────────────────────
-// 1-cell margin rule: cards and sheets must always sit ≥1 grid cell from the
-// viewport edge and ≥1 grid cell from each other.
-//
-// Combined sheet: holds the card slot row (top 3 rows) and the naming/narrative
-// content area (bottom 7 rows) separated by a 1-row gap.
-//   gx=1 (1-cell left margin), gy=1 (1-cell top margin)
-//   14 cols wide, 11 rows tall (3 card slots + 1 gap + 7 content = 11)
-const COMBINED_SHEET_GX = 1;
-const COMBINED_SHEET_GY = 1;
-const COMBINED_SHEET_COLS = 14;
-const COMBINED_SHEET_ROWS = 11;
-// Slot dx offsets within the sheet (5 × 2-wide cards with 1-cell gaps)
-const TOP_SLOT_DXS = [0, 3, 6, 9, 12];
-const TOP_SLOT_DY = 0;
-// Content starts at dy=4 within the combined sheet (3 card rows + 1 gap row)
-const CONTENT_DY = 4;
-// Action cards + choice slot form a symmetric trio when the reading is done.
-// Sheet spans gx=1..15. Three 2-wide elements with 3-cell gaps:
-//   new-reading: gx=2..4 (1 cell from left edge)
-//   choice slot: gx=7..9 (centered)
-//   begin-game:  gx=12..14 (1 cell from right edge)
-// gy=8 is within the content area, leaving text above.
-const ACTION_NEW_GX = 2;
-const ACTION_BEGIN_GX = 12;
+// ── Selection phase: the five choices ────────────────────────────────────────
+// A row of five beneath the sheet rather than a pile beside it. The grid cannot
+// centre a 2-wide card over a 5-cell span, which is why the old 2×2-plus-one
+// arrangement had to indent its last card; a row is the only shape that reads as
+// deliberate. It also puts every option at the same height, so no single card is
+// the one that falls below the fold.
+const CHOICE_CARD_GXS = [1, 4, 7, 10, 13];
+const CHOICE_CARD_GY = 8;
+
+// ── Ready phase: the action band ─────────────────────────────────────────────
+// Deals into the bottom band of the content area — below where a ~150-word
+// narrative actually reaches, so the default placement leaves the text readable.
+// These are ordinary draggable cards: putting them back over the narrative is
+// allowed and expected. Nothing here prevents it, and nothing resizes the text
+// to get out of their way.
+const ACTION_NEW_GX = 2;      // gx 2..3
+const ACTION_BEGIN_GX = 12;   // gx 12..13
 const ACTION_CARD_GY = 8;
-// Choice slot position (dx/dy relative to COMBINED_SHEET)
-const CHOICE_SLOT_DX = 6; // absolute gx = 1+6 = 7
-const CHOICE_SLOT_DY = 7; // absolute gy = 1+7 = 8 — same row as action cards
+const CHOICE_SLOT_DX = 6;     // absolute gx = 1+6 = 7..8 — centred between them
+const CHOICE_SLOT_DY = 7;     // absolute gy = 1+7 = 8 — same row as action cards
 
+/** Deal the current spread's five options into the choice row below the sheet. */
 function getCardsForSpread(spreadIndex: number): Record<string, CardData> {
   const result: Record<string, CardData> = {};
   CARD_SPREADS[spreadIndex].cards.forEach((card, i) => {
     result[`tarot-${spreadIndex}-${card.id}`] = {
-      gx: SPREAD_CARD_GXS[i],
-      gy: SPREAD_CARD_GYS[i],
+      gx: CHOICE_CARD_GXS[i],
+      gy: CHOICE_CARD_GY,
     };
   });
   return result;
 }
 
-/** Build card positions locked into the top sheet's slots after selection completes. */
-function getRowCards(lockedIds: Record<number, string>): Record<string, CardData> {
-  const result: Record<string, CardData> = {};
-  for (const [idxStr, cardId] of Object.entries(lockedIds)) {
-    const idx = parseInt(idxStr);
-    const slotId = `row-slot-${idx}`;
-    result[`tarot-${idx}-${cardId}`] = {
-      gx: COMBINED_SHEET_GX + TOP_SLOT_DXS[idx],
-      gy: COMBINED_SHEET_GY + TOP_SLOT_DY,
-      slotId,
-    };
-  }
-  return result;
+/** Drop every card that isn't sitting in a slot, keeping the placed ones put. */
+function keepOnlyPlaced(cards: Record<string, CardData>): Record<string, CardData> {
+  return Object.fromEntries(Object.entries(cards).filter(([, data]) => data.slotId));
 }
 
 // ── Tarot card face content ───────────────────────────────────────────────
@@ -368,48 +353,26 @@ export default function CultCardSelection() {
     if (!isLast) {
       const nextIdx = slotIdx + 1;
       setCurrentSpreadIndex(nextIdx);
-      setCards(prev => {
-        const next: Record<string, CardData> = {};
-        // Keep all cards already in slots (from completed spreads)
-        for (const [id, data] of Object.entries(prev)) {
-          if (data.slotId) next[id] = data;
-        }
-        // Explicitly place the just-dropped card at the computed slot position
-        next[cardId] = { gx: slotGx, gy: slotGy, slotId };
-        // Add next spread's cards
-        Object.assign(next, getCardsForSpread(nextIdx));
-        return next;
-      });
+      setCards(prev => ({
+        ...keepOnlyPlaced(prev),
+        [cardId]: { gx: slotGx, gy: slotGy, slotId },
+        ...getCardsForSpread(nextIdx),
+      }));
     } else {
       setCurrentSpreadIndex(CARD_SPREADS.length);
-      setCards(prev => {
-        const next: Record<string, CardData> = {};
-        for (const [id, data] of Object.entries(prev)) {
-          if (data.slotId) next[id] = data;
-        }
-        next[cardId] = { gx: slotGx, gy: slotGy, slotId };
-        return next;
-      });
-      // Compute all locked card IDs including this final drop, then transition
-      const allLocked = { ...lockedCardIds, [slotIdx]: tarotCardName };
-      setTimeout(() => {
-        setNarrativeState('naming');
-        // Move all 5 locked cards into the horizontal top row (strips slotIds)
-        setCards(getRowCards(allLocked));
-      }, 300);
+      setCards(prev => ({
+        ...keepOnlyPlaced(prev),
+        [cardId]: { gx: slotGx, gy: slotGy, slotId },
+      }));
+      // The slot row is in the same place in every phase, so the five placed
+      // cards need no repositioning — only the sheet beneath them changes.
+      setTimeout(() => setNarrativeState('naming'), 300);
     }
-  }, [currentSpreadIndex, lockedCardIds]);
+  }, [currentSpreadIndex]);
 
   // Used only within the selection sheet
   const activeSpread = CARD_SPREADS[currentSpreadIndex];
-  const lockedSummary = Object.entries(lockedCardIds)
-    .sort(([a], [b]) => parseInt(a) - parseInt(b))
-    .map(([idx, cardId]) => {
-      const spread = CARD_SPREADS[parseInt(idx)];
-      const card = spread.cards.find(c => c.id === cardId);
-      return card ? `${spread.title}: ${card.name}` : null;
-    })
-    .filter(Boolean);
+  const sheetRows = readingState === 'selection' ? SHEET_ROWS_SELECTION : SHEET_ROWS_READING;
 
   // ── Single Table render — all phases ─────────────────────────────────────
   return (
@@ -417,10 +380,56 @@ export default function CultCardSelection() {
       <Table cards={cards} onCardsChange={setCards} onSlotDrop={handleSlotDrop}>
 
         {/* ══════════════════════════════════════════════════════════════════
-            SELECTION PHASE — divination scroll sheet + free tarot cards
+            THE SHEET — one sheet across every phase. The five spread slots sit
+            in its top band and never move, so a card placed during selection
+            stays exactly where it is through naming, narration and the ending.
+            Only the sheet's height and the content below the band change.
         ══════════════════════════════════════════════════════════════════ */}
-        {readingState === 'selection' && (
-          <Sheet gx={SHEET_GX} gy={SHEET_GY} cols={SHEET_COLS} rows={SHEET_ROWS}>
+        <Sheet gx={SHEET_GX} gy={SHEET_GY} cols={SHEET_COLS} rows={sheetRows}>
+
+          {/* ── The spread: five slots along the top band ── */}
+          {SLOT_DXS.map((dx, idx) => {
+            // Steps you haven't reached yet have no slot during selection.
+            if (readingState === 'selection' && idx > currentSpreadIndex) return null;
+            const isActive = readingState === 'selection' && idx === currentSpreadIndex;
+            return (
+              <React.Fragment key={`spread-${idx}`}>
+                {/* Spread title, tucked inside the slot's top edge. A placed card
+                    covers this and carries the same title in its own header, so
+                    the label reads continuously once the slot is filled. */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: dx * GRID + 10,
+                    top: SLOT_DY * GRID + 13,
+                    width: 2 * GRID - 20,
+                    textAlign: 'center',
+                    fontFamily: 'serif',
+                    fontSize: '11px',
+                    color: isActive ? 'rgba(251,191,36,0.9)' : 'rgba(217,119,6,0.5)',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {CARD_SPREADS[idx].title}
+                </div>
+                <Slot
+                  id={`slot-${idx}`}
+                  dx={dx}
+                  dy={SLOT_DY}
+                  locked={!isActive}
+                  emptyLabel={CARD_SPREADS[idx].meaning}
+                  className={isActive ? 'ui-slot-active' : ''}
+                />
+              </React.Fragment>
+            );
+          })}
+
+          {/* ── SELECTION — the prompt for the current spread ── */}
+          {readingState === 'selection' && (
+            <div style={{
+              position: 'absolute', top: CONTENT_DY * GRID,
+              left: 0, right: 0, bottom: 0, pointerEvents: 'none',
+            }}>
 
             {/* Decorative header */}
             <div
@@ -476,11 +485,15 @@ export default function CultCardSelection() {
               {activeSpread?.prompt}
             </div>
 
-            {/* Reset button */}
+            </div>
+          )}
+
+          {/* Reset — bottom corner, clear of the slot band above */}
+          {readingState === 'selection' && (
             <button
               onClick={reset}
               style={{
-                position: 'absolute', top: 14, right: 12,
+                position: 'absolute', bottom: 10, right: 14,
                 fontSize: '11px', padding: '3px 10px',
                 background: 'rgba(15,10,5,0.5)',
                 border: '1px solid rgba(120,53,15,0.3)',
@@ -490,140 +503,19 @@ export default function CultCardSelection() {
             >
               Reset
             </button>
+          )}
 
-            {/* Column labels (just above slots) */}
-            {SLOT_DXS.map((dx, idx) => (
-              <div
-                key={`col-label-${idx}`}
-                style={{
-                  position: 'absolute',
-                  left: dx * GRID + 4,
-                  top: SLOT_DY * GRID - 30,
-                  width: 2 * GRID - 8,
-                  textAlign: 'center',
-                  fontFamily: 'serif',
-                  fontSize: '11px',
-                  color:
-                    idx < currentSpreadIndex
-                      ? 'rgba(217,119,6,0.5)'
-                      : idx === currentSpreadIndex
-                      ? 'rgba(251,191,36,0.9)'
-                      : 'rgba(120,53,15,0.22)',
-                  pointerEvents: 'none',
-                }}
-              >
-                {CARD_SPREADS[idx].title}
-              </div>
-            ))}
-
-            {/* Slots: past (locked) + active; future steps not yet rendered */}
-            {SLOT_DXS.map((dx, idx) => {
-              if (idx > currentSpreadIndex) return null;
-              return (
-                <Slot
-                  key={`slot-${idx}`}
-                  id={`slot-${idx}`}
-                  dx={dx}
-                  dy={SLOT_DY}
-                  locked={idx < currentSpreadIndex}
-                  emptyLabel={CARD_SPREADS[idx].meaning}
-                  className={idx === currentSpreadIndex ? 'ui-slot-active' : ''}
-                />
-              );
-            })}
-
-            {/* Meaning labels (just below slots) */}
-            {SLOT_DXS.map((dx, idx) => (
-              <div
-                key={`meaning-${idx}`}
-                style={{
-                  position: 'absolute',
-                  left: dx * GRID + 4,
-                  top: (SLOT_DY + 3) * GRID + 10,
-                  width: 2 * GRID - 8,
-                  textAlign: 'center',
-                  fontSize: '10px',
-                  fontStyle: 'italic',
-                  lineHeight: 1.4,
-                  color:
-                    idx < currentSpreadIndex
-                      ? 'rgba(217,119,6,0.45)'
-                      : idx === currentSpreadIndex
-                      ? 'rgba(217,119,6,0.6)'
-                      : 'rgba(120,53,15,0.2)',
-                  pointerEvents: 'none',
-                }}
-              >
-                {CARD_SPREADS[idx].meaning}
-              </div>
-            ))}
-
-            {/* Locked selections summary (bottom of sheet) */}
-            {lockedSummary.length > 0 && (
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: 18, left: 20, right: 20,
-                  display: 'flex', flexWrap: 'wrap',
-                  gap: '8px 16px', justifyContent: 'center',
-                  pointerEvents: 'none',
-                }}
-              >
-                {lockedSummary.map((s, i) => (
-                  <span key={i} style={{ fontSize: '11px', color: 'rgba(217,119,6,0.55)', fontStyle: 'italic' }}>
-                    {s}
-                  </span>
-                ))}
-              </div>
-            )}
-
-          </Sheet>
-        )}
-
-        {/* ══════════════════════════════════════════════════════════════════
-            POST-SELECTION — combined sheet: card slot row + naming / narrative
-        ══════════════════════════════════════════════════════════════════ */}
-        {readingState !== 'selection' && (
-          <Sheet gx={COMBINED_SHEET_GX} gy={COMBINED_SHEET_GY} cols={COMBINED_SHEET_COLS} rows={COMBINED_SHEET_ROWS}>
-            {/* Spread title labels floating above each slot */}
-            {TOP_SLOT_DXS.map((dx, idx) => (
-              <div
-                key={`row-label-${idx}`}
-                style={{
-                  position: 'absolute',
-                  left: dx * GRID + 4,
-                  top: TOP_SLOT_DY * GRID - 26,
-                  width: 2 * GRID - 8,
-                  textAlign: 'center',
-                  fontFamily: 'serif',
-                  fontSize: '11px',
-                  color: 'rgba(217,119,6,0.55)',
-                  pointerEvents: 'none',
-                }}
-              >
-                {CARD_SPREADS[idx].title}
-              </div>
-            ))}
-            {/* Locked slots — selected cards snap here and cannot be removed */}
-            {TOP_SLOT_DXS.map((dx, idx) => (
-              <Slot
-                key={`row-slot-${idx}`}
-                id={`row-slot-${idx}`}
-                dx={dx}
-                dy={TOP_SLOT_DY}
-                locked
-              />
-            ))}
-
-            {/* Choice slot — appears when reading is complete; drag an action card here */}
-            {readingState === 'ready' && (
-              <Slot
-                id="action-choice"
-                dx={CHOICE_SLOT_DX}
-                dy={CHOICE_SLOT_DY}
-                emptyLabel="Drag your choice here"
-              />
-            )}
+          {/* Choice slot — appears when the reading completes. The two action
+              cards deal in beside it, clear of where the narrative text reaches;
+              dragging them back over the text is allowed. */}
+          {readingState === 'ready' && (
+            <Slot
+              id="action-choice"
+              dx={CHOICE_SLOT_DX}
+              dy={CHOICE_SLOT_DY}
+              emptyLabel="Drag your choice here"
+            />
+          )}
 
             {/* ── NAMING PHASE ── */}
             {readingState === 'naming' && (
@@ -862,8 +754,7 @@ export default function CultCardSelection() {
             </div>
               </div>
             )}
-          </Sheet>
-        )}
+        </Sheet>
 
         {/* ══════════════════════════════════════════════════════════════════
             CARDS — tarot cards (all phases) + action cards (ready phase)
@@ -891,9 +782,8 @@ export default function CultCardSelection() {
           const isLockedCard = readingState !== 'selection' || !!cardData.slotId;
           let dealDelay = 0;
           if (!cardData.slotId && readingState === 'selection') {
-            const posIdx = SPREAD_CARD_GXS.findIndex(
-              (gx, i) => gx === cardData.gx && SPREAD_CARD_GYS[i] === cardData.gy
-            );
+            // All five choices share a row, so gx alone identifies the position.
+            const posIdx = CHOICE_CARD_GXS.indexOf(cardData.gx);
             dealDelay = posIdx >= 0 ? posIdx * 60 : 0;
           }
           return (

@@ -1,290 +1,313 @@
-import { useState } from 'react';
+/**
+ * MagicPrototype — dev route at /magic
+ *
+ * Generates a one-city world on the server, assigns Correspondence aspects to
+ * items, and dumps everything onto two zones of a single Table:
+ *
+ *   LEFT  (gx < RITUAL_THRESHOLD)  — item pool, drag from here
+ *   RIGHT (gx >= RITUAL_THRESHOLD) — ritual space, free placement only
+ *
+ * Press D (or click the button) to toggle the cheat overlay.
+ *
+ * Server sends: MAGIC_PROTO_STATE { cityName, items: WorldItem[], magic: MagicWorldState }
+ * Client sends: INIT_MAGIC_PROTO   (on mount)
+ */
 
-interface Card {
-  id: string;
-  name: string;
-  color: string;
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Table, Card, Sheet, type CardData } from './ui';
+import { HookCard } from './ui/templates/HookCard';
+import { useGameSocket } from './hooks/useGameSocket';
+import { resolveRitualArea, resolveRitualAreaAll } from './game/magic/correspondence';
+import type { MagicWorldState, PairResult } from './game/magic/types';
+import type { WorldItem, HookType } from './game/types';
+
+// ── Layout constants ────────────────────────────────────────────────────────
+
+/** gx at which the ritual zone begins */
+const RITUAL_THRESHOLD = 8;
+/** Column 0 gx for the item pool */
+const POOL_COL_0 = 0;
+/** Column 1 gx for the item pool */
+const POOL_COL_1 = 3;
+/** Row spacing in the pool (card height=3, 1 gap) */
+const POOL_ROW_STEP = 4;
+
+function poolPosition(index: number): { gx: number; gy: number } {
+  const col = index % 2;
+  const row = Math.floor(index / 2);
+  return {
+    gx: col === 0 ? POOL_COL_0 : POOL_COL_1,
+    gy: row * POOL_ROW_STEP,
+  };
 }
 
-interface DroppedCard extends Card {
-  position: { x: number; y: number };
-  target?: string;
-}
+// ── Result type labels / colours ────────────────────────────────────────────
 
-const INITIAL_CARDS: Card[] = [
-  { id: 'card1', name: 'The Flame', color: 'bg-red-600' },
-  { id: 'card2', name: 'The Void', color: 'bg-purple-900' },
-  { id: 'card3', name: 'The Eye', color: 'bg-amber-500' },
-  { id: 'card4', name: 'The Serpent', color: 'bg-green-600' },
-  { id: 'card5', name: 'The Crown', color: 'bg-yellow-400' },
-];
-
-const CARD_EFFECTS: Record<string, { circle: string; altar: string }> = {
-  card1: {
-    circle: 'Flames dance in a perfect spiral, warming the ritual space',
-    altar: 'The altar burns with purifying fire, smoke rising in spirals'
-  },
-  card2: {
-    circle: 'Reality warps at the edges, shadows deepen impossibly',
-    altar: 'Offerings vanish into nothingness, consumed by the void'
-  },
-  card3: {
-    circle: 'A thousand eyes open in the air, watching, knowing',
-    altar: 'The altar reveals hidden truths in its surface reflections'
-  },
-  card4: {
-    circle: 'Serpents coil through the circle, their scales shimmering with power',
-    altar: 'Venom drips onto the altar, transforming all it touches'
-  },
-  card5: {
-    circle: 'Golden light crowns the circle, authority radiating outward',
-    altar: 'The altar becomes a throne of ancient sovereignty'
-  }
+const RESULT_STYLES: Record<string, string> = {
+  resonance: 'border-violet-500/60 bg-violet-900/30 text-violet-200',
+  rupture:   'border-red-600/60 bg-red-900/30 text-red-200',
+  inert:     'border-slate-600/40 bg-slate-800/20 text-slate-400',
 };
 
+const RESULT_LABELS: Record<string, string> = {
+  resonance: 'RESONANCE',
+  rupture:   'RUPTURE',
+  inert:     'INERT',
+};
+
+// ── Component ───────────────────────────────────────────────────────────────
+
 export default function MagicPrototype() {
-  const [hand, setHand] = useState<Card[]>(INITIAL_CARDS);
-  const [droppedCards, setDroppedCards] = useState<DroppedCard[]>([]);
-  const [draggedCard, setDraggedCard] = useState<Card | null>(null);
-  const [dragSource, setDragSource] = useState<'hand' | 'table' | null>(null);
+  const { send, subscribe } = useGameSocket();
 
-  const handleDragStart = (card: Card, source: 'hand' | 'table') => {
-    setDraggedCard(card);
-    setDragSource(source);
-  };
+  const [cityName, setCityName]   = useState<string | null>(null);
+  const [items, setItems]         = useState<WorldItem[]>([]);
+  const [magic, setMagic]         = useState<MagicWorldState | null>(null);
+  const [cards, setCards]         = useState<Record<string, CardData>>({});
+  const [pairResults, setPairResults] = useState<PairResult[]>([]);
+  const [overlayVisible, setOverlayVisible] = useState(false);
 
-  const handleDragEnd = () => {
-    setDraggedCard(null);
-    setDragSource(null);
-  };
+  // Keep magic ref in sync for onCardsChange without stale closure
+  const magicRef = useRef<MagicWorldState | null>(null);
+  magicRef.current = magic;
 
-  const handleDropOnTable = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (!draggedCard) return;
+  // ── Server init ────────────────────────────────────────────────────────
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+  useEffect(() => {
+    const unsub = subscribe('MAGIC_PROTO_STATE', (payload: {
+      cityName: string;
+      items: WorldItem[];
+      magic: MagicWorldState;
+    }) => {
+      console.log('[magic] Received MAGIC_PROTO_STATE for city', payload.cityName, `(${payload.items.length} items)`);
+      setCityName(payload.cityName);
+      setItems(payload.items);
+      setMagic(payload.magic);
 
-    // Remove from hand if dragging from hand
-    if (dragSource === 'hand') {
-      setHand(hand.filter(c => c.id !== draggedCard.id));
-    } else if (dragSource === 'table') {
-      // Remove from table (will be re-added at new position)
-      setDroppedCards(droppedCards.filter(c => c.id !== draggedCard.id));
+      // Place all items in the pool
+      const initialCards: Record<string, CardData> = {};
+      payload.items.forEach((item, i) => {
+        initialCards[item.id] = poolPosition(i);
+      });
+      setCards(initialCards);
+      setPairResults([]);
+    });
+
+    console.log('[magic] Sending INIT_MAGIC_PROTO');
+    send({ type: 'INIT_MAGIC_PROTO' });
+
+    return unsub;
+  }, []);
+
+  // ── Keyboard overlay toggle ────────────────────────────────────────────
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'd' || e.key === 'D') setOverlayVisible(v => !v);
     }
-    
-    // Add to table at new position (clear target when dropping on general table)
-    setDroppedCards([
-      ...droppedCards.filter(c => c.id !== draggedCard.id),
-      { id: draggedCard.id, name: draggedCard.name, color: draggedCard.color, position: { x, y } }
-    ]);
-  };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
-  const handleDropOnTarget = (e: React.DragEvent, targetName: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!draggedCard) return;
+  // ── Card change handler — recompute ritual pairs ───────────────────────
 
-    // Get position relative to the main table, not the target
-    const tableElement = document.querySelector('.magic-table') as HTMLElement;
-    if (!tableElement) return;
-    
-    const tableRect = tableElement.getBoundingClientRect();
-    const x = e.clientX - tableRect.left;
-    const y = e.clientY - tableRect.top;
+  const handleCardsChange = useCallback((newCards: Record<string, CardData>) => {
+    setCards(newCards);
+    const m = magicRef.current;
+    if (!m) return;
 
-    // Remove from hand if dragging from hand
-    if (dragSource === 'hand') {
-      setHand(hand.filter(c => c.id !== draggedCard.id));
-    } else if (dragSource === 'table') {
-      // Remove from table (will be re-added at new position)
-      setDroppedCards(droppedCards.filter(c => c.id !== draggedCard.id));
-    }
-    
-    // Add to target at new position
-    setDroppedCards([
-      ...droppedCards.filter(c => c.id !== draggedCard.id),
-      { ...draggedCard, position: { x, y }, target: targetName }
-    ]);
-  };
+    const ritualIds = Object.entries(newCards)
+      .filter(([, pos]) => pos.gx >= RITUAL_THRESHOLD)
+      .map(([id]) => id);
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
+    console.log('[magic] Ritual zone cards:', ritualIds);
+    const results = resolveRitualArea(ritualIds, m.params);
+    setPairResults(results);
+  }, []);
 
-  const returnCardToHand = (cardId: string) => {
-    const card = droppedCards.find(c => c.id === cardId);
-    if (!card) return;
+  // ── Helpers ────────────────────────────────────────────────────────────
 
-    setDroppedCards(droppedCards.filter(c => c.id !== cardId));
-    setHand([...hand, { id: card.id, name: card.name, color: card.color }]);
-  };
+  const itemById = useCallback((id: string) => items.find(i => i.id === id), [items]);
 
-  const handleDropOnHand = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (!draggedCard || dragSource !== 'table') return;
+  const ritualIds = Object.entries(cards)
+    .filter(([, pos]) => pos.gx >= RITUAL_THRESHOLD)
+    .map(([id]) => id);
 
-    returnCardToHand(draggedCard.id);
-  };
+  // All pairs including inert, for the cheat overlay
+  const allPairResults = magic && ritualIds.length >= 2
+    ? resolveRitualAreaAll(ritualIds, magic.params)
+    : [];
 
-  const resetTable = () => {
-    setHand(INITIAL_CARDS);
-    setDroppedCards([]);
-  };
+  // ── Loading state ──────────────────────────────────────────────────────
 
-  // Calculate active effects
-  const activeEffects = droppedCards
-    .filter(card => card.target)
-    .map(card => ({
-      cardName: card.name,
-      target: card.target!,
-      effect: card.target === 'circle' 
-        ? CARD_EFFECTS[card.id]?.circle 
-        : CARD_EFFECTS[card.id]?.altar
-    }));
+  if (!magic) {
+    return (
+      <div className="w-screen h-screen flex items-center justify-center bg-slate-950 text-slate-400 font-serif">
+        <div className="text-center space-y-2">
+          <div className="text-lg text-amber-200/60">Ritual space loading…</div>
+          <div className="text-xs text-slate-500">connecting to server</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-4xl font-bold text-amber-400">Magic Prototype</h1>
-          <button
-            onClick={resetTable}
-            className="px-4 py-2 bg-purple-700 hover:bg-purple-600 text-white rounded-lg transition-colors"
-          >
-            Reset
-          </button>
-        </div>
+    <div className="w-screen h-screen overflow-hidden bg-slate-950">
+      <Table cards={cards} onCardsChange={handleCardsChange}>
 
-        {/* Hand of Cards */}
-        <div 
-          className="mb-8 bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-purple-500/30"
-          onDrop={handleDropOnHand}
-          onDragOver={handleDragOver}
-        >
-          <h2 className="text-xl font-semibold text-amber-300 mb-4">Your Hand</h2>
-          <div className="flex gap-4 flex-wrap min-h-[12rem]">
-            {hand.map(card => (
-              <div
-                key={card.id}
-                draggable
-                onDragStart={() => handleDragStart(card, 'hand')}
-                onDragEnd={handleDragEnd}
-                className={`${card.color} w-32 h-48 rounded-lg shadow-2xl cursor-move 
-                  flex items-center justify-center text-white font-bold text-center p-4
-                  border-2 border-white/20 hover:scale-105 transition-transform
-                  ${draggedCard?.id === card.id ? 'opacity-50' : ''}`}
-              >
-                {card.name}
-              </div>
-            ))}
-            {hand.length === 0 && (
-              <p className="text-slate-400 italic">No cards remaining in hand</p>
-            )}
+        {/* ── Ritual zone marker sheet ── */}
+        <Sheet gx={RITUAL_THRESHOLD} gy={-1} cols={20} rows={100}>
+          <div className="h-full w-full border-l border-violet-700/30 bg-violet-950/10 flex flex-col pt-2 pl-2">
+            <span className="text-xs font-serif text-violet-400/40 tracking-widest uppercase select-none">
+              The Second Table
+            </span>
           </div>
-        </div>
+        </Sheet>
 
-        {/* Main Table */}
-        <div
-          onDrop={handleDropOnTable}
-          onDragOver={handleDragOver}
-          className="magic-table relative bg-gradient-to-br from-green-900/40 to-green-800/40 
-            backdrop-blur-sm rounded-xl border-4 border-amber-600/50 shadow-2xl
-            min-h-[600px] p-8"
-        >
-          <div className="absolute top-4 left-4 text-amber-300/50 text-sm font-semibold">
-            THE TABLE
-          </div>
-
-          {/* Predefined Drop Targets */}
-          <div className="absolute top-20 left-1/2 transform -translate-x-1/2 flex gap-12">
-            {/* Target 1: Circle of Power */}
-            <div
-              onDrop={(e) => handleDropOnTarget(e, 'circle')}
-              onDragOver={handleDragOver}
-              className="relative w-48 h-48 rounded-full border-4 border-dashed border-purple-400/50
-                bg-purple-500/10 hover:bg-purple-500/20 transition-colors
-                flex items-center justify-center"
-            >
-              <span className="text-purple-300 font-semibold text-sm text-center">
-                Circle of Power
-              </span>
-            </div>
-
-            {/* Target 2: Altar */}
-            <div
-              onDrop={(e) => handleDropOnTarget(e, 'altar')}
-              onDragOver={handleDragOver}
-              className="relative w-56 h-40 border-4 border-dashed border-amber-400/50
-                bg-amber-500/10 hover:bg-amber-500/20 transition-colors
-                flex items-center justify-center rounded-lg"
-            >
-              <span className="text-amber-300 font-semibold text-sm text-center">
-                The Altar
-              </span>
-            </div>
-          </div>
-
-          {/* Dropped Cards */}
-          {droppedCards.map(card => (
-            <div
-              key={card.id}
-              draggable
-              onDragStart={() => handleDragStart(card, 'table')}
-              onDragEnd={handleDragEnd} animate-pulse
-              style={{
-                position: 'absolute',
-                left: `${card.position.x}px`,
-                top: `${card.position.y}px`,
-                transform: 'translate(-50%, -50%)'
-              }}
-              onDoubleClick={() => returnCardToHand(card.id)}
-              className={`${card.color} w-32 h-48 rounded-lg shadow-2xl cursor-move 
-                flex items-center justify-center text-white font-bold text-center p-4
-                border-2 border-white/20 hover:scale-110 transition-transform
-                ${card.target ? 'ring-4 ring-white/30' : ''}
-                ${draggedCard?.id === card.id ? 'opacity-50' : ''}`}
-              title={card.target ? `On ${card.target} (double-click to return)` : 'Double-click to return to hand'}
-            >
-              {card.name}
-            </div>
-          ))}
-        </div>
-
-        {/* Active Effects Display */}
-        {activeEffects.length > 0 && (
-          <div className="mt-6 bg-gradient-to-r from-purple-900/50 to-amber-900/50 backdrop-blur-sm rounded-xl p-6 border border-amber-500/50">
-            <h2 className="text-2xl font-bold text-amber-300 mb-4">Active Effects</h2>
-            <div className="space-y-3">
-              {activeEffects.map((effect, idx) => (
-                <div key={idx} className="bg-black/30 rounded-lg p-4 border border-purple-500/30">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-amber-400 font-bold">{effect.cardName}</span>
-                    <span className="text-purple-300 text-sm">
-                      → {effect.target === 'circle' ? 'Circle of Power' : 'The Altar'}
-                    </span>
-                  </div>
-                  <p className="text-slate-300 italic text-sm">{effect.effect}</p>
-                </div>
-              ))}
-            </div>
-          </div>
+        {/* ── Item pool — all WorldItems as HookCards ── */}
+        {items.map((item) =>
+          item.id in cards ? (
+            <Card key={item.id} id={item.id}>
+              <HookCard
+                type={item.types[0] as HookType}
+                title={item.name}
+                description={item.flavorDescription || undefined}
+              />
+            </Card>
+          ) : null
         )}
 
-        {/* Info */}
-        <div className="mt-6 bg-slate-800/50 backdrop-blur-sm rounded-xl p-4 border border-purple-500/30">
-          <p className="text-amber-300 text-sm">
-            <strong>Instructions:</strong> Drag cards from your hand onto the table. 
-            Drop them on the Circle of Power or The Altar for special placement, or anywhere else on the table. 
-            Cards can be dragged around the table to reposition them, or dragged back to your hand. 
-            Double-click any placed card to return it to your hand.
-          </p>
-          <p className="text-purple-300 text-xs mt-2">
-            Cards in targets: {droppedCards.filter(c => c.target).length} | 
-            Cards on table: {droppedCards.filter(c => !c.target).length}
-          </p>
+      </Table>
+
+      {/* ── City label ── */}
+      <div className="fixed top-4 left-4 z-[100] pointer-events-none">
+        <div className="text-xs text-amber-500/50 font-serif tracking-wide">
+          {cityName ?? '…'}
         </div>
+        <div className="text-xs text-slate-600 mt-0.5">
+          {items.length} items · drag right to place in ritual space →
+        </div>
+      </div>
+
+      {/* ── Pair results panel ── */}
+      <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 max-w-72 pointer-events-none">
+        {pairResults.length === 0 && ritualIds.length === 0 && (
+          <div className="text-xs text-slate-600 font-serif italic">
+            Drag items into the ritual space to observe their correspondences.
+          </div>
+        )}
+        {pairResults.length === 0 && ritualIds.length >= 2 && (
+          <div className="text-xs text-slate-500 font-serif italic">
+            No correspondences surface.
+          </div>
+        )}
+        {pairResults.map((r, i) => {
+          const nameA = itemById(r.itemIdA)?.name ?? r.itemIdA;
+          const nameB = itemById(r.itemIdB)?.name ?? r.itemIdB;
+          return (
+            <div
+              key={i}
+              className={`rounded border px-3 py-2 text-xs space-y-1 ${RESULT_STYLES[r.type]}`}
+            >
+              <div className="font-mono font-bold tracking-widest text-[10px]">
+                {RESULT_LABELS[r.type]}
+              </div>
+              <div className="font-serif text-[11px] opacity-70">
+                {nameA} × {nameB}
+              </div>
+              <div className="leading-snug opacity-80 font-serif italic">
+                {r.description}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Cheat overlay toggle button ── */}
+      <div className="fixed bottom-4 left-4 z-[100]">
+        <button
+          onClick={() => setOverlayVisible(v => !v)}
+          className={`text-xs px-3 py-1.5 rounded border font-mono transition-colors
+            ${overlayVisible
+              ? 'border-violet-500/70 text-violet-300 bg-violet-900/40'
+              : 'border-slate-600/40 text-slate-500 hover:text-slate-300 hover:border-slate-500/50'
+            }`}
+        >
+          {overlayVisible ? 'hide cheat [D]' : 'cheat [D]'}
+        </button>
+      </div>
+
+      {/* ── Cheat overlay ── */}
+      {overlayVisible && (
+        <div className="fixed inset-4 top-16 z-[200] pointer-events-none flex gap-4">
+
+          {/* Active pairs + item aspects */}
+          <div className="bg-slate-900/90 border border-slate-700/50 rounded p-3 text-xs font-mono space-y-2 self-start min-w-48">
+            <div className="text-amber-400/80 font-bold tracking-wide text-[10px] uppercase">
+              Grammar: {magic.grammar}
+            </div>
+            <div className="text-slate-400 text-[10px] uppercase tracking-wide mt-2">
+              Active pairs
+            </div>
+            {magic.params.activePairs.map(([a, b], i) => (
+              <div key={i} className="text-slate-300">
+                <span className="text-violet-300">{a}</span>
+                <span className="text-slate-500"> / </span>
+                <span className="text-red-300">{b}</span>
+              </div>
+            ))}
+
+            <div className="text-slate-400 text-[10px] uppercase tracking-wide mt-3 pt-2 border-t border-slate-700/50">
+              Item aspects
+            </div>
+            <div className="space-y-0.5 max-h-64 overflow-y-auto">
+              {items.map(item => {
+                const aspects = magic.params.itemAspects[item.id];
+                return (
+                  <div key={item.id} className="flex justify-between gap-2">
+                    <span className="text-slate-400 truncate max-w-[120px]">{item.name}</span>
+                    <span className={aspects?.length ? 'text-violet-200' : 'text-slate-600'}>
+                      {aspects?.length ? aspects.join(', ') : '—'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Live pair breakdown (includes inert) */}
+          {allPairResults.length > 0 && (
+            <div className="bg-slate-900/90 border border-slate-700/50 rounded p-3 text-xs font-mono space-y-1.5 self-start min-w-64">
+              <div className="text-slate-400 text-[10px] uppercase tracking-wide">
+                Ritual space — all pairs
+              </div>
+              {allPairResults.map((r, i) => {
+                const nameA = itemById(r.itemIdA)?.name ?? r.itemIdA;
+                const nameB = itemById(r.itemIdB)?.name ?? r.itemIdB;
+                const aspectsA = magic.params.itemAspects[r.itemIdA] ?? [];
+                const aspectsB = magic.params.itemAspects[r.itemIdB] ?? [];
+                return (
+                  <div key={i} className={`px-2 py-1 rounded ${RESULT_STYLES[r.type]}`}>
+                    <div className="font-bold text-[10px] tracking-widest">
+                      {RESULT_LABELS[r.type]}
+                    </div>
+                    <div className="text-[10px] opacity-70">
+                      [{aspectsA.join(', ') || '—'}] × [{aspectsB.join(', ') || '—'}]
+                    </div>
+                    <div className="text-[10px] opacity-60 truncate">
+                      {nameA} × {nameB}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Back link ── */}
+      <div className="fixed bottom-4 right-4 z-[100] text-xs text-slate-600">
+        <a href="/" className="hover:text-slate-400 transition-colors">← back</a>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 /**
  * useGameSocket — React hook providing a shared WebSocket connection to the
- * game server (port 5174).
+ * game server (port 5274).
  *
  * Usage:
  *   const { send, subscribe, isConnected } = useGameSocket();
@@ -25,7 +25,8 @@ let _isConnected = false;
 
 function getServerUrl(): string {
   const host = window.location.hostname;
-  return `ws://${host}:5174`;
+  // Must match PORT in server/index.ts.
+  return `ws://${host}:5274`;
 }
 
 function notifyConnectionState(connected: boolean): void {

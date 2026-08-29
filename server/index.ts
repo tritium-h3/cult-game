@@ -1,6 +1,6 @@
 /**
  * Cult Game WebSocket Server
- * Port 5174 — owns all game logic, LLM interactions, and per-game state.
+ * Port 5274 — owns all game logic, LLM interactions, and per-game state.
  *
  * Each game has a UUID. The frontend stores its gameId in localStorage and
  * includes it in every message that requires game context.
@@ -23,6 +23,8 @@ import {
 } from '../src/game/actions';
 import { getCityById, CITIES } from '../src/game/world';
 import { generateWorldState } from '../src/game/worldGen';
+import { generateCorrespondenceParams } from '../src/game/magic/correspondence';
+import type { MagicWorldState } from '../src/game/magic/types';
 import {
   generateInitialGameState,
   generateCultName,
@@ -33,7 +35,7 @@ import type { GameState, WorldState, Action, Outcome, Card, HookType, Verb } fro
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GAMES_DIR = path.join(__dirname, 'games');
-const PORT = 5174;
+const PORT = 5274;
 const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'torment-nexus.local';
 
 // Ensure games directory exists on startup
@@ -398,6 +400,20 @@ function handleLoadSample(ws: WebSocket): void {
   send(ws, { type: 'STATE', payload: { gameId, state: toClientGameState(sampleState, worldState) } });
 }
 
+function handleInitMagicProto(ws: WebSocket): void {
+  // Pick a random city and generate items + correspondence params.
+  // Ephemeral — nothing is persisted; the client owns this state for the session.
+  const city = CITIES[Math.floor(Math.random() * CITIES.length)];
+  const worldState = generateWorldState(city.id, 1);
+  const items = worldState.items[city.id] ?? [];
+
+  const params = generateCorrespondenceParams(items);
+  const magic: MagicWorldState = { grammar: 'correspondence', params };
+
+  console.log(`[magic] Generated correspondence world for city "${city.name}" (${items.length} items)`);
+  send(ws, { type: 'MAGIC_PROTO_STATE', payload: { cityName: city.name, items, magic } });
+}
+
 function handleReset(ws: WebSocket, gameId: string | undefined): void {
   if (gameId) {
     games.delete(gameId);
@@ -452,6 +468,9 @@ wss.on('connection', (ws, req) => {
           break;
         case 'LOAD_SAMPLE':
           handleLoadSample(ws);
+          break;
+        case 'INIT_MAGIC_PROTO':
+          handleInitMagicProto(ws);
           break;
         case 'RESET':
           handleReset(ws, message.payload?.gameId);
